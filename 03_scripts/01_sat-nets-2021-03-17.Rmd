@@ -1,0 +1,1931 @@
+---
+title: "Untitled"
+author: "Emorie D Beck"
+date: "4/5/2017"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(knitr.kable.NA = '')
+source("~/Box/network/other projects/swb networks/02_graphicalVAR-testing.R")
+```
+
+```{r}
+Mode <- function(x) {
+  ux <- unique(x)
+  ux <- ux[!is.na(ux)]
+  ux[which.max(tabulate(match(x, ux)))]
+}
+```
+
+
+# Workspace  
+## Packages  
+```{r}
+library(qgraph)
+library(igraph)
+library(glasso)
+library(mlVAR)
+library(graphicalVAR)
+library(knitr)
+library(kableExtra)
+library(readxl)      # read excel files
+library(Rmisc)
+library(psych)
+library(magrittr)
+library(data.table)
+library(tidyverse)
+library(Matrix)
+library(RColorBrewer)
+
+wd <- "~/Box/network/other projects/swb networks"
+data_path <- "/Volumes/Emorie Beck/data"
+```
+
+## Codebooks  
+```{r}
+# list of all codebook sheets
+sheets <- sprintf("%s/02_codebooks/01_master-codebook-2021-03-17.xlsx", wd) %>% excel_sheets()
+
+# function for reading in sheets
+read_fun <- function(x){
+  sprintf("%s/02_codebooks/01_master-codebook-2021-03-17.xlsx", wd) %>% read_xlsx(., sheet = x)
+}
+
+# read in sheets and index source
+codebook <- tibble(
+  study = sheets,
+  codebook = map(study, read_fun)
+)
+```
+
+## Data  
+### GSOEP  
+#### Load Data  
+```{r gsoep clean fun}
+gsoep_read_fun <- function(Year, WL){
+  print(Year)
+  old.names <- (gsoep_codebook %>% filter(year == Year | category == "proc"))$orig_itemname 
+  p <- sprintf("%s/gsoep/%sp.sav", data_path, WL) %>% haven::read_sav(.) %>%
+    full_join(sprintf("%s/gsoep/%skind.sav", data_path, WL) %>% haven::read_sav(.)) %>%
+    full_join(sprintf("%s/gsoep/%spequiv.sav", data_path, WL) %>% haven::read_sav(.)) %>%
+    full_join(sprintf("%s/gsoep/%spgen.sav", data_path, WL) %>% haven::read_sav(.)) %>%
+    full_join(sprintf("%s/gsoep/%spkal.sav", data_path, WL) %>% haven::read_sav(.)) %>%
+    select(persnr, hhnr, one_of(old.names)) %>%
+    gather(key = orig_itemname, value = value, -persnr, -hhnr, na.rm = T)
+  
+ ph <- sprintf("%s/gsoep/%shbrutto.sav", data_path, WL) %>% haven::read_sav(.) %>%
+    full_join(sprintf("%s/gsoep/%sh.sav", data_path, WL) %>% haven::read_sav(.)) %>%
+    select(hhnr, one_of(old.names))
+ if(ncol(ph) != 0){
+   p <- ph %>%
+    gather(key = orig_itemname, value = value, -hhnr, na.rm = T) %>%
+    full_join(p %>% select(persnr, hhnr) %>% distinct()) %>%
+    full_join(p)
+ }
+   return(p)
+}
+```
+
+```{r gsoep codebook}
+gsoep_codebook <- (codebook %>% filter(study == "gsoep"))$codebook[[1]] %>%
+  mutate(orig_itemname = str_to_lower(orig_itemname)
+         , orig_itemname = str_remove_all(orig_itemname, "[:space:]"))
+gsoep_codebook
+```
+
+```{r gsoep data, eval = F}
+gsoep <- gsoep_codebook %>% 
+  select(wave, waveletter, year) %>%
+  filter(complete.cases(.)) %>%
+  distinct() %>%
+  arrange(year) %>%
+  filter(year < "2018") %>%
+  mutate(data = map2(year, waveletter, gsoep_read_fun)) 
+
+old.names <- unique(gsoep_codebook$orig_itemname)
+
+gsoep_long <- gsoep %>% 
+  unnest(data) %>%
+  select(-wave, -waveletter, -hhnr) %>%
+  full_join(sprintf("%s/gsoep/bioparen.sav", data_path) %>% 
+  haven::read_sav(.) %>%
+  select(one_of(old.names)) %>%
+  gather(key = orig_itemname, value = value, -persnr, na.rm = T) %>%
+  mutate(year = 0)) %>%
+  rename(SID = persnr)
+
+save(gsoep, file = sprintf("%s/01_data/01_clean/gsoep_raw.RData", wd))
+rm(gsoep)
+```
+
+#### Recoding  
+```{r gsoep recode, eval = F}
+# join data with recoding info 
+gsoep_recode <- gsoep_codebook %>%
+  filter(category %in% c("overall", "domain", "correlates")) %>%
+  select(category, name, itemname, wave, year, orig_itemname, reverse_code:long_rule) %>%
+  group_by(category, name) %>% 
+  nest() %>%
+  ungroup() %>%
+  mutate(data = map(data, ~(.) %>% left_join(gsoep_long))) 
+
+# recode 
+recode_fun <- function(rule, y, year){
+  x <- y$value
+  if(!is.na(rule)){y$value <- eval(parse(text = rule))}
+  return(y)
+}
+
+gsoep_recode <- gsoep_recode %>% 
+  mutate(data = map(data, ~(.) %>% 
+    group_by(recode, year) %>%
+    nest() %>%
+    ungroup() %>%
+    mutate(data = pmap(list(recode, data, year), recode_fun)) %>%
+    unnest(data) %>%
+    mutate(value = ifelse(value < 0 | is.nan(value) | is.infinite(value), NA, value))))
+
+
+# reverse code 
+gsoep_recode <- gsoep_recode %>%
+  mutate(data = map(data, ~(.) %>%
+    mutate(value = ifelse(reverse_code == "no" | is.na(reverse_code), value, 
+                        reverse.code(-1, value, mini = mini, maxi = maxi)))))
+
+fun_call <- function(x, rule){
+    switch(rule,
+           average = mean(x, na.rm = T),
+           mode = Mode(x)[1],
+           sum = sum(x, na.rm = T),
+           skip = unique(x)[1],
+           select = unique(x)[1],
+           max = max(x, na.rm = T),
+           min = min(x, na.rm = T))
+  }
+```
+
+#### Satisfaction  
+```{r, eval = F}
+gsoep <- gsoep_recode %>%
+  filter(category != "correlates") %>%
+  unnest(data) %>%
+  select(name, year, SID, value) %>%
+  filter(complete.cases(.)) %>%
+  group_by(name, year, SID) %>%
+  summarize(value = mean(value)) %>%
+  ungroup() %>%
+  pivot_wider(names_from = "name", values_from = "value") %>%
+  group_by(SID) %>%
+  filter(n() >= 5) %>%
+  ungroup()
+
+gsoep_years <- gsoep %>%
+  group_by(SID) %>%
+  filter(year == median(year)) %>%
+  ungroup() %>%
+  select(m_year = year, SID)
+```
+
+#### Correlates  
+
+```{r, eval = F}
+gsoep_corr <- gsoep_recode %>%
+  filter(category == "correlates") %>%
+  select(-category) %>%
+  mutate(data = map(data, ~(.) %>% 
+      filter(!is.na(value)) %>%
+      mutate(comp_rule = ifelse(is.na(comp_rule), "skip", comp_rule)) %>%
+      group_by(comp_rule, SID, year, long_rule) %>%
+      nest() %>%
+      ungroup() %>%
+      mutate(data = map2(data, comp_rule, ~fun_call((.x)$value, .y))) %>%
+      unnest(data) %>%
+      right_join(gsoep_years) %>%
+      filter(year <= m_year)
+      # summarize(value = fun_call(value, comp_rule)) %>%
+      # ungroup() %>% 
+      # mutate(value = ifelse(is.infinite(value) | is.nan(value), NA, value))
+      ))
+
+comp_fun <- function(d, rule, p_year){
+  print(paste(rule, p_year))
+  d %>%
+    group_by(SID, name) %>%
+    summarize(value = fun_call(data, rule)) %>%
+    ungroup() %>%
+    distinct()
+}
+
+# composite ACROSS years
+gsoep_corr <- gsoep_corr %>%
+  unnest(data) %>%
+  mutate(long_rule = ifelse(is.na(long_rule), "skip", long_rule)) %>%
+  filter(year <= m_year) %>%
+  group_by(m_year, long_rule) %>%
+  nest() %>%
+  ungroup() %>%
+  mutate(data = pmap(list(data, long_rule, m_year), comp_fun)) %>%
+  unnest(data) %>%
+  mutate(value = ifelse(is.infinite(value) | is.nan(value), NA, value)) %>%
+  select(-long_rule) %>%
+  spread(name, value) %>%
+  filter(!is.na(SID))%>%
+  mutate(yearBrth = ifelse(yearBrth < 1000, yearBrth + 1000, yearBrth)
+         , age = m_year - yearBrth) 
+```
+
+```{r, eval = F}
+save(gsoep, gsoep_corr, file = sprintf("%s/01_data/01_clean/01_gsoep-clean.RData", wd))
+rm(list = ls()[grepl("gsoep", ls())])
+```
+
+```{r}
+load(sprintf("%s/01_data/01_clean/01_gsoep-clean.RData", wd))
+```
+
+### BHPS  
+#### Load Data  
+```{r bhps clean fun, eval = F}
+bhps_read_fun <- function(Year, WL){
+  old.names <- (bhps_codebook %>% filter(year == Year | year == 0))$orig_itemname
+  keep <- c("SIDp", "pidp", sprintf("%shid", WL))
+  sprintf("%s/bhps/%sindresp.sav", data_path, WL) %>% haven::read_sav(.) %>%
+    full_join(sprintf("%s/bhps/%shhresp.sav", data_path, WL) %>% haven::read_sav(.)) %>%
+    select(one_of(keep), one_of(old.names)) %>%
+    haven::zap_labels(.) %>%
+    gather(key = orig_itemname, value = value, -one_of(keep), na.rm = T) %>%
+    set_names(c("SID", "HHID", "orig_itemname", "value")) %>%
+    mutate(value = as.numeric(value))
+}
+```
+
+```{r bhps codebook}
+bhps_codebook <- (codebook %>% filter(study == "bhps"))$codebook[[1]] %>%
+  mutate(orig_itemname = str_to_lower(orig_itemname))
+bhps_codebook
+```
+
+```{r bhps data, eval = F}
+bhps_xwaveid <- sprintf("%s/data/bhps/xwaveid.sav", data_path) %>% read_sav()
+
+bhps <- bhps_codebook %>% 
+  select(wave, waveletter, year) %>%
+  distinct() %>%
+  filter(year != 0) %>%
+  mutate(data = map2(year, waveletter, bhps_read_fun)) 
+
+bhps_long <- bhps %>% 
+  unnest(data) %>% 
+  distinct()
+
+save(bhps, file = sprintf("%s/01_data/01_clean/02_bhps-raw.RData", wd))
+rm(bhps)
+```
+
+#### Recoding  
+```{r bhps recode, eval = F}
+# join data with recoding info 
+bhps_recode <- bhps_codebook %>%
+  filter(category %in% c("overall", "domain", "correlates")) %>%
+  select(category, name, itemname, wave, year, orig_itemname, reverse_code:recode, mini, maxi, comp_rule, long_rule) %>%
+  group_by(category, name) %>% 
+  nest() %>%
+  ungroup() %>%
+  mutate(data = map(data, ~(.) %>% left_join(bhps_long))) 
+
+# recode 
+recode_fun <- function(rule, y, year){
+  x <- y$value
+  if(!is.na(rule)){y$value <- eval(parse(text = rule))}
+  return(y)
+}
+
+bhps_recode <- bhps_recode %>% 
+  mutate(data = map(data, ~(.) %>% 
+    group_by(recode, year) %>%
+    nest() %>%
+    ungroup() %>%
+    mutate(data = pmap(list(recode, data, year), recode_fun)) %>%
+    unnest(data) %>%
+    mutate(value = ifelse(value < 0 | is.nan(value) | is.infinite(value), NA, value))))
+
+
+# reverse code 
+bhps_recode <- bhps_recode %>%
+  mutate(data = map(data, ~(.) %>%
+    mutate(value = ifelse(reverse_code == "no" | is.na(reverse_code), value, 
+                        reverse.code(-1, value, mini = mini, maxi = maxi)))))
+
+fun_call <- function(x, rule){
+    switch(rule,
+           average = mean(x, na.rm = T),
+           mode = Mode(x)[1],
+           sum = sum(x, na.rm = T),
+           skip = unique(x)[1],
+           select = unique(x)[1],
+           max = max(x, na.rm = T),
+           min = min(x, na.rm = T))
+  }
+```
+
+#### Satisfaction  
+```{r, eval = F}
+bhps <- bhps_recode %>%
+  filter(category != "correlates") %>%
+  unnest(data) %>%
+  select(name, year, SID, value) %>%
+  filter(complete.cases(.)) %>%
+  group_by(name, year, SID) %>%
+  summarize(value = mean(value)) %>%
+  ungroup() %>%
+  pivot_wider(names_from = "name", values_from = "value") %>%
+  group_by(SID) %>%
+  filter(n() >= 5) %>%
+  ungroup()
+
+bhps_years <- bhps %>%
+  group_by(SID) %>%
+  filter(year == median(year)) %>%
+  ungroup() %>%
+  select(m_year = year, SID)
+```
+
+#### Correlates  
+
+```{r, eval = F}
+bhps_corr <- bhps_recode %>%
+  filter(category == "correlates") %>%
+  select(-category) %>%
+  unnest(data) %>%
+  mutate(year = ifelse(name == "parEdu", 0, year)) %>%
+  group_by(name) %>% nest() %>% ungroup() %>%
+  mutate(data = map(data, ~(.) %>% 
+      filter(!is.na(value)) %>%
+      mutate(comp_rule = ifelse(is.na(comp_rule), "skip", comp_rule)) %>%
+      group_by(comp_rule, SID, year, long_rule) %>%
+      nest() %>%
+      ungroup() %>%
+      mutate(data = map2(data, comp_rule, ~fun_call((.x)$value, .y))) %>%
+      unnest(data) %>%
+      right_join(bhps_years) %>%
+      filter(year <= m_year)
+      # summarize(value = fun_call(value, comp_rule)) %>%
+      # ungroup() %>% 
+      # mutate(value = ifelse(is.infinite(value) | is.nan(value), NA, value))
+      ))
+
+comp_fun <- function(d, rule, p_year){
+  print(paste(rule, p_year))
+  d %>%
+    group_by(SID, name) %>%
+    summarize(value = fun_call(data, rule)) %>%
+    ungroup() %>%
+    distinct()
+}
+
+# composite ACROSS years
+bhps_corr <- bhps_corr %>%
+  unnest(data) %>%
+  mutate(long_rule = ifelse(is.na(long_rule), "skip", long_rule)) %>%
+  filter(year <= m_year) %>%
+  group_by(m_year, long_rule) %>%
+  nest() %>%
+  ungroup() %>%
+  mutate(data = pmap(list(data, long_rule, m_year), comp_fun)) %>%
+  unnest(data) %>%
+  mutate(value = ifelse(is.infinite(value) | is.nan(value), NA, value)) %>%
+  select(-long_rule) %>%
+  spread(name, value) %>%
+  filter(!is.na(SID))%>%
+  mutate(yearBrth = ifelse(yearBrth < 1000, yearBrth + 1000, yearBrth)
+         , age = m_year - yearBrth) 
+```
+
+```{r, eval = F}
+save(bhps, bhps_corr, file = sprintf("%s/01_data/01_clean/02_bhps-clean.RData", wd))
+rm(list = ls()[grepl("bhps", ls())])
+```
+
+```{r bhps load}
+load(sprintf("%s/01_data/01_clean/02_bhps-clean.RData", wd))
+```
+
+
+### SHP  
+#### Load Data  
+```{r shp clean fun, eval = F}
+shp_read_fun <- function(x){
+  if(grepl("SHP0_BV", x)){old.names <- str_to_lower(old.names)}
+  y <- sprintf("%s/shp/%s", data_path, x) %>% haven::read_sav(.) %>%
+    haven::zap_labels(.) %>% select(one_of(old.names))
+  if(grepl("SHP0_BV", x)){colnames(y) <- str_to_upper(colnames(y))}
+  return(y)
+} 
+```
+
+```{r shp codebook}
+shp_codebook <- (codebook %>% filter(study == "shp"))$codebook[[1]] %>%
+  filter(year <= 2017 | is.na(year) | year == 0)
+shp_codebook
+```
+
+```{r shp data, eval = F}
+old.names <- unique(shp_codebook$orig_itemname) %>% str_to_upper
+datasets <- sprintf("%s/shp", data_path) %>% list.files()
+shp <- tibble(datasets = datasets) %>%
+  mutate(data = map(datasets, shp_read_fun),
+         ncol = map(data, ncol)) %>% 
+  unnest(ncol) %>%
+  filter(ncol > 1)
+
+shp_grid <- shp %>% filter(datasets == "SHP_MH.sav")
+shp <- shp %>% filter(datasets != "SHP_MH.sav")
+
+shp <- reduce(shp$data, full_join) %>% haven::zap_labels(.)
+
+shp_long <- shp %>%
+  select(-contains("IDHOUS")) %>%
+  pivot_longer(cols = -IDPERS, names_to = "orig_itemname", values_to = "value", values_drop_na = T)
+
+save(shp, file = sprintf("%s/01_data/01_clean/shp_raw.RData", wd))
+rm(shp)
+```
+
+#### Recoding  
+```{r shp recode, eval = F}
+# join data with recoding info 
+shp_recode <- shp_codebook %>%
+  filter(category %in% c("overall", "domain", "correlates")) %>%
+  select(category, name, itemname, wave, year, orig_itemname, reverse_code:recode, maxi, mini, comp_rule, long_rule) %>%
+  group_by(category, name) %>% 
+  nest() %>%
+  ungroup() %>%
+  mutate(data = map(data, ~(.) %>% left_join(shp_long %>% rename(SID = IDPERS)))) 
+
+# recode 
+recode_fun <- function(rule, y, year){
+  yearBrth <- y$yearBrth
+  x <- y$value
+  if(!is.na(rule)){y$value <- eval(parse(text = rule))}
+  return(y)
+}
+
+shp_yearbrth <- shp_recode %>% 
+  filter(name == "yearBrth") %>%
+  unnest(data) %>%
+  group_by(SID) %>%
+  summarize(yearBrth = Mode(value)) %>%
+  ungroup()
+
+shp_recode <- shp_recode %>%
+  mutate(data = map(data, ~(.) %>% 
+    left_join(shp_yearbrth) %>%
+    group_by(recode, year) %>%
+    nest() %>%
+    ungroup() %>%
+    mutate(data = pmap(list(recode, data, year), recode_fun)) %>%
+    unnest(data) %>%
+    mutate(value = ifelse(value < 0 | is.nan(value) | is.infinite(value), NA, value)) %>%
+    select(-yearBrth)))
+
+# reverse code 
+shp_recode <- shp_recode %>%
+  mutate(data = map(data, ~(.) %>%
+    mutate(value = ifelse(reverse_code == "no" | is.na(reverse_code), value, 
+                        reverse.code(-1, value, mini = mini, maxi = maxi)))))
+
+fun_call <- function(x, rule){
+    switch(rule,
+           average = mean(x, na.rm = T),
+           mode = Mode(x)[1],
+           sum = sum(x, na.rm = T),
+           skip = unique(x)[1],
+           select = unique(x)[1],
+           max = max(x, na.rm = T),
+           min = min(x, na.rm = T))
+  }
+```
+
+#### Satisfaction  
+```{r, eval = F}
+shp <- shp_recode %>%
+  filter(category != "correlates") %>%
+  unnest(data) %>%
+  select(name, year, SID, value) %>%
+  filter(complete.cases(.)) %>%
+  group_by(name, year, SID) %>%
+  summarize(value = mean(value)) %>%
+  ungroup() %>%
+  pivot_wider(names_from = "name", values_from = "value") %>%
+  group_by(SID) %>%
+  filter(n() >= 5) %>%
+  ungroup()
+
+shp_years <- shp %>%
+  group_by(SID) %>%
+  filter(year == median(year)) %>%
+  ungroup() %>%
+  select(m_year = year, SID)
+```
+
+#### Correlates  
+
+```{r, eval = F}
+shp_corr <- shp_recode %>%
+  filter(category == "correlates") %>%
+  select(-category) %>%
+  unnest(data) %>%
+  mutate(year = ifelse(name == "parEdu", 0, year)) %>%
+  group_by(name) %>% nest() %>% ungroup() %>%
+  mutate(data = map(data, ~(.) %>% 
+      filter(!is.na(value)) %>%
+      mutate(comp_rule = ifelse(is.na(comp_rule), "skip", comp_rule)) %>%
+      group_by(comp_rule, SID, year, long_rule) %>%
+      nest() %>%
+      ungroup() %>%
+      mutate(data = map2(data, comp_rule, ~fun_call((.x)$value, .y))) %>%
+      unnest(data) %>%
+      right_join(shp_years) %>%
+      filter(year <= m_year)
+      # summarize(value = fun_call(value, comp_rule)) %>%
+      # ungroup() %>% 
+      # mutate(value = ifelse(is.infinite(value) | is.nan(value), NA, value))
+      ))
+
+comp_fun <- function(d, rule, p_year){
+  print(paste(rule, p_year))
+  d %>%
+    group_by(SID, name) %>%
+    summarize(value = fun_call(data, rule)) %>%
+    ungroup() %>%
+    distinct()
+}
+
+# composite ACROSS years
+shp_corr <- shp_corr %>%
+  unnest(data) %>%
+  mutate(long_rule = ifelse(is.na(long_rule), "skip", long_rule)) %>%
+  filter(year <= m_year) %>%
+  group_by(m_year, long_rule) %>%
+  nest() %>%
+  ungroup() %>%
+  mutate(data = pmap(list(data, long_rule, m_year), comp_fun)) %>%
+  unnest(data) %>%
+  mutate(value = ifelse(is.infinite(value) | is.nan(value), NA, value)) %>%
+  select(-long_rule) %>%
+  spread(name, value) %>%
+  filter(!is.na(SID))%>%
+  mutate(yearBrth = ifelse(yearBrth < 1000, yearBrth + 1000, yearBrth)
+         , age = m_year - yearBrth) 
+```
+
+```{r, eval = F}
+save(shp, shp_corr, file = sprintf("%s/01_data/01_clean/03_shp-clean.RData", wd))
+rm(list = ls()[grepl("shp", ls())])
+```
+
+```{r shp load}
+load(sprintf("%s/01_data/01_clean/03_shp-clean.RData", wd))
+```
+
+### LISS  
+#### Load Data  
+```{r liss clean fun, eval = F}
+liss_read_fun <- function(x){
+  sprintf("%s/liss/%s", data_path, x) %>% haven::read_sav(.) %>% select(one_of(old.names))
+}
+```
+
+```{r liss codebook}
+liss_codebook <- (codebook %>% filter(study == "liss"))$codebook[[1]]
+liss_codebook
+```
+
+```{r liss data, eval = F}
+old.names <- unique(liss_codebook$orig_itemname) %>% str_to_lower
+datasets <- sprintf("%s/liss", data_path) %>% list.files()
+liss <- tibble(datasets = datasets) %>%
+  mutate(data = map(datasets, liss_read_fun)) 
+
+liss <- reduce(liss$data, full_join) %>% haven::zap_labels(.)
+save(liss, file = sprintf("%s/01_data/01_clean/04_liss-raw.RData", wd))
+
+avars <- tibble(ds = datasets[grepl("avar", datasets)]) %>%
+  mutate(data = map(ds, ~sprintf("%s/liss/%s", data_path, .) %>% haven::read_sav(.) %>% select(one_of(old.names)) %>% haven::zap_labels(.))) %>%
+  separate(ds, c("ds", "year", "scrap1", "scrap2"), sep = "_") %>%
+  separate(year, c("year", "month"), -2) %>%
+  select(year, month, data) %>% 
+  unnest(data) %>%
+  pivot_longer(cols = c(burgstat, geslacht, belbezig, gebjaar)
+               , names_to = "orig_itemname"
+               , values_to = "value"
+               , values_drop_na = T) %>%
+  group_by(orig_itemname, nomem_encr, year) %>%
+  summarize(value = Mode(value)) %>%
+  ungroup()
+
+liss_long <- liss %>%
+  pivot_longer(cols = -nomem_encr
+               , names_to = "orig_itemname"
+               , values_to = "value"
+               , values_drop_na = T) %>%
+  left_join(liss_codebook %>% select(orig_itemname, year)) %>%
+  full_join(avars %>% mutate(year = as.numeric(year)))
+```
+
+#### Recoding  
+```{r, eval = F} 
+rename_fun <- function(df){
+  df %>% left_join(liss_long %>% rename(SID = nomem_encr))
+}
+
+# join data with recoding info 
+liss_recode <- liss_codebook %>%
+  filter(category %in% c("overall", "domain", "correlates")) %>%
+  select(category, name, itemname, wave, year, orig_itemname, reverse_code:recode, mini, maxi, comp_rule, long_rule) %>%
+  distinct() %>%
+  group_by(category, name, mini, maxi) %>% 
+  nest() %>%
+  ungroup() %>%
+  mutate(data = map(data, rename_fun)) 
+
+# recode 
+recode_fun <- function(rule, y, year){
+  x <- y$value
+  if(!is.na(rule)){y$value <- eval(parse(text = rule))}
+  return(y)
+}
+
+liss_recode <- liss_recode %>% 
+  mutate(data = map(data, ~(.) %>% 
+    group_by(recode, year) %>%
+    nest() %>%
+    ungroup() %>%
+    mutate(data = pmap(list(recode, data, year), recode_fun)) %>%
+    unnest(data) %>%
+    mutate(value = ifelse(value < 0 | is.nan(value) | is.infinite(value), NA, value))))
+
+rev_code_fun <- function(df, mini, maxi){
+  df %>%
+    mutate(value = ifelse(reverse_code == "no" | is.na(reverse_code), value, 
+                        reverse.code(-1, value, mini = mini, maxi = maxi)))
+}
+
+# reverse code 
+liss_recode <- liss_recode %>%
+  mutate(data = pmap(list(data, mini, maxi), rev_code_fun))
+
+fun_call <- function(x, rule){
+    switch(rule,
+           average = mean(x, na.rm = T),
+           mode = Mode(x)[1],
+           sum = sum(x, na.rm = T),
+           skip = unique(x)[1],
+           select = unique(x)[1],
+           max = max(x, na.rm = T),
+           min = min(x, na.rm = T))
+  }
+```
+
+#### Satisfaction  
+```{r liss restructuring, eval = F}
+pomp_fun <- function(d, mini, maxi){
+  d %>%
+     mutate(value = ((value - mini)/(maxi-mini))*10) # pomp)
+}
+
+liss <- liss_recode %>%
+  filter(category != "correlates") %>%
+  mutate(data = pmap(list(data, mini, maxi), pomp_fun)) %>%
+  unnest(data) %>%
+  select(name, year, SID, value) %>%
+  filter(complete.cases(.)) %>%
+  group_by(name, year, SID) %>%
+  summarize(value = mean(value)) %>%
+  ungroup() %>%
+  pivot_wider(names_from = "name", values_from = "value") %>%
+  group_by(SID) %>%
+  filter(n() >= 5) %>%
+  ungroup()
+
+liss_years <- liss %>%
+  group_by(SID) %>%
+  filter(year == median(year)) %>%
+  ungroup() %>%
+  select(m_year = year, SID)
+```
+
+#### Correlates  
+
+```{r, eval = F}
+liss_corr <- liss_recode %>%
+  filter(category == "correlates") %>%
+  select(-category) %>%
+  unnest(data) %>%
+  mutate(year = ifelse(name == "parEdu", 0, year)) %>%
+  group_by(name) %>% nest() %>% ungroup() %>%
+  mutate(data = map(data, ~(.) %>% 
+      filter(!is.na(value)) %>%
+      mutate(comp_rule = ifelse(is.na(comp_rule), "skip", comp_rule)) %>%
+      group_by(comp_rule, SID, year, long_rule) %>%
+      nest() %>%
+      ungroup() %>%
+      mutate(data = map2(data, comp_rule, ~fun_call((.x)$value, .y))) %>%
+      unnest(data) %>%
+      right_join(liss_years) %>%
+      filter(year <= m_year)
+      # summarize(value = fun_call(value, comp_rule)) %>%
+      # ungroup() %>% 
+      # mutate(value = ifelse(is.infinite(value) | is.nan(value), NA, value))
+      ))
+
+comp_fun <- function(d, rule, p_year){
+  print(paste(rule, p_year))
+  d %>%
+    group_by(SID, name) %>%
+    summarize(value = fun_call(data, rule)) %>%
+    ungroup() %>%
+    distinct()
+}
+
+# composite ACROSS years
+liss_corr <- liss_corr %>%
+  unnest(data) %>%
+  mutate(long_rule = ifelse(is.na(long_rule), "skip", long_rule)) %>%
+  filter(year <= m_year) %>%
+  group_by(m_year, long_rule) %>%
+  nest() %>%
+  ungroup() %>%
+  mutate(data = pmap(list(data, long_rule, m_year), comp_fun)) %>%
+  unnest(data) %>%
+  mutate(value = ifelse(is.infinite(value) | is.nan(value), NA, value)) %>%
+  select(-long_rule) %>%
+  spread(name, value) %>%
+  filter(!is.na(SID))%>%
+  mutate(yearBrth = ifelse(yearBrth < 1000, yearBrth + 1000, yearBrth)
+         , age = m_year - yearBrth) 
+```
+
+```{r, eval = F}
+save(liss, liss_corr, file = sprintf("%s/01_data/01_clean/04_liss-clean.RData", wd))
+rm(list = ls()[grepl("liss", ls())])
+```
+
+
+```{r liss load}
+load(sprintf("%s/01_data/01_clean/04_liss-clean.RData", wd))
+```
+
+### HILDA  
+#### Load Data  
+```{r hilda clean fun, eval = F}
+hilda_read_fun <- function(Year, WL){
+  old.names <- (hilda_codebook %>% filter(year == Year | year == 0))$orig_itemname
+  sprintf("%s/hilda/Combined %s180c.sav", data_path, WL) %>% haven::read_sav(.) %>%
+    select(one_of(old.names)) 
+}
+```
+
+```{r hilda codebook}
+hilda_codebook <- (codebook %>% filter(study == "hilda"))$codebook[[1]]
+hilda_codebook
+```
+
+```{r hilda data, eval = F}
+hilda <- hilda_codebook %>% 
+  select(year, wave_letter) %>%
+  filter(!is.na(wave_letter)) %>%
+  distinct() %>%
+  mutate(wave_letter = tolower(wave_letter), 
+         data = map2(year, wave_letter, hilda_read_fun)) 
+
+save(hilda, file = sprintf("%s/01_data/01_clean/hilda_raw.RData", wd))
+```
+
+#### Recoding  
+```{r hilda recode, eval = F}
+rename_fun <- function(df, Year){
+  df <- df %>%
+    haven::zap_labels(.) %>%
+    gather(key = orig_itemname, value = value, -xwaveid, na.rm=T) %>%
+    mutate(value=as.numeric(value))
+  hilda_codebook %>% 
+    select(category, name, itemname, year, orig_itemname, recode, reverse_code, mini, maxi, comp_rule, long_rule) %>%
+    filter(year == Year & category %in% c("overall", "domain", "correlates")) %>%
+    full_join(df)
+}
+
+# join data with recoding info 
+hilda_recode <- hilda %>%
+  mutate(data = map2(data, year, rename_fun)) %>% 
+  select(-year, -wave_letter) %>%
+  unnest(data) %>%
+  distinct() %>%
+  rename(SID = xwaveid) %>%
+  group_by(category, name) %>%
+  nest() %>% 
+  ungroup()
+
+# recode 
+recode_fun <- function(rule, y, year){
+  x <- y$value
+  if(!is.na(rule)){y$value <- eval(parse(text = rule))}
+  return(y)
+}
+
+hilda_recode <- hilda_recode %>% 
+  mutate(data = map(data, ~(.) %>% 
+    group_by(recode, year) %>%
+    nest() %>%
+    ungroup() %>%
+    mutate(data = pmap(list(recode, data, year), recode_fun)) %>%
+    unnest(data) %>%
+    mutate(value = ifelse(value < 0 | is.nan(value) | is.infinite(value), NA, value))))
+
+fun_call <- function(x, rule){
+    switch(rule,
+           average = mean(x, na.rm = T),
+           mode = Mode(x)[1],
+           sum = sum(x, na.rm = T),
+           skip = unique(x)[1],
+           select = unique(x)[1],
+           max = max(x, na.rm = T),
+           min = min(x, na.rm = T))
+  }
+```
+
+#### Satisfaction  
+```{r hilda restructuring, eval = F}
+hilda <- 
+    hilda_recode %>%
+      filter(category != "correlates") %>%
+      unnest(data) %>%
+      select(name, year, SID, value) %>%
+      filter(complete.cases(.)) %>%
+      group_by(name, year, SID) %>%
+      summarize(value = mean(value)) %>%
+      ungroup() %>%
+      pivot_wider(names_from = "name", values_from = "value") %>%
+  group_by(SID) %>%
+  filter(n() >= 5) %>%
+  ungroup()
+
+hilda_years <- hilda %>%
+  group_by(SID) %>%
+  filter(year == median(year)) %>%
+  ungroup() %>%
+  select(m_year = year, SID)
+```
+
+#### Correlates  
+
+```{r, eval = F}
+hilda_corr <- hilda_recode %>%
+  filter(category == "correlates") %>%
+  select(-category) %>%
+  mutate(data = map(data, ~(.) %>% 
+      filter(!is.na(value)) %>%
+      mutate(comp_rule = ifelse(is.na(comp_rule), "skip", comp_rule)) %>%
+      group_by(comp_rule, SID, year, long_rule) %>%
+      nest() %>%
+      ungroup() %>%
+      mutate(data = map2(data, comp_rule, ~fun_call((.x)$value, .y))) %>%
+      unnest(data) %>%
+      right_join(hilda_years) %>%
+      filter(year <= m_year)
+      ))
+
+comp_fun <- function(d, rule, p_year){
+  print(paste(rule, p_year))
+  d %>%
+    group_by(SID, name) %>%
+    summarize(value = fun_call(data, rule)) %>%
+    ungroup() %>%
+    distinct()
+}
+
+# composite ACROSS years
+hilda_corr <- hilda_corr %>%
+  unnest(data) %>%
+  mutate(long_rule = ifelse(is.na(long_rule), "skip", long_rule)) %>%
+  filter(year <= m_year) %>%
+  group_by(m_year, long_rule) %>%
+  nest() %>%
+  ungroup() %>%
+  mutate(data = pmap(list(data, long_rule, m_year), comp_fun)) %>%
+  unnest(data) %>%
+  mutate(value = ifelse(is.infinite(value) | is.nan(value), NA, value)) %>%
+  select(-long_rule) %>%
+  spread(name, value) %>%
+  filter(!is.na(SID))%>%
+  mutate(yearBrth = ifelse(yearBrth < 1000, yearBrth + 1000, yearBrth)
+         , age = m_year - yearBrth) 
+```
+
+```{r}
+save(hilda, hilda_corr, file = sprintf("%s/01_data/01_clean/05_hilda-clean.RData", wd))
+rm(list = ls()[grepl("hilda", ls())])
+```
+
+
+```{r hilda load}
+load(sprintf("%s/01_data/01_clean/05_hilda-clean.RData", wd))
+```
+
+# Zero Order Relationships  
+```{r zero-order relationships}
+r_fun <- function(dat){
+  dat <- dat %>% ungroup()
+  r <- cor(dat %>% select(-SID), use = "pairwise")
+  r[upper.tri(r, diag = T)] <- NA
+  nvar <- nrow(r)
+  tab <- data.frame(r) %>% mutate(v1 = paste(1:nvar, ". ", rownames(.), sep = "")) %>% 
+    select(v1, everything(), -age) %>%
+    full_join(dat %>% select(-SID) %>% gather(key = v1, value = value) %>%
+                group_by(v1) %>%
+                summarize(mean = mean(value, na.rm = T), sd = sd(value, na.rm = T)) %>%
+                ungroup() %>%
+                mutate(v1 = factor(v1, levels = colnames(r))) %>% 
+                arrange(v1) %>%
+                mutate(v1 = paste(1:nvar, ". ", v1, sep = ""))) %>%
+    setNames(c("v1", 1:(nvar-1), "M", "SD")) %>%
+    mutate_at(vars(`1`:SD), ~ifelse(!is.na(.) == T, sprintf("%.2f", .), ""))
+  
+  tab$M[grepl("gender", tab$v1)] <- paste(sprintf("%.2f", table(dat$gender)[1]/sum(table(dat$gender))), " %", sep = "")
+  tab$SD[grepl("gender", tab$v1)] <- ""
+  return(tab)
+}
+
+rs <- tibble(
+  dataset = c("GSOEP", "SHP", "BHPS", "LISS"), 
+  data = list(
+    gsoep %>% filter(year == 1985) %>% select(SID, amtleis, health:work, gender, age),
+    shp %>% filter(year == 2001) %>% select(SID, amtleis, health:lifesat, social:work, gender, age),
+    bhps %>% filter(year == 1996) %>% select(SID, amtleis:work, gender, age),
+    liss %>% filter(year == 2008) %>% select(SID, amtleis:work, gender, age)
+    )
+) %>%
+  mutate(r = map(data, r_fun))
+```
+
+
+# Population Networks
+## Model Function  
+```{r mlvar functions}
+mlVAR_call <- function(d, study, type){
+  mlVAR_fun(d, study, type, 1)
+  # mlVAR_fun(d, study, type, 2)
+  return(NULL)
+}
+
+mlVAR_fun <- function(d, study, type, lag){
+  vs <- colnames(d %>% select(-SID, -year))
+  m <- mlVAR(
+    d
+    , vars = vs
+    , idvar = "SID"
+    , lags = lag
+    # , beepvar = "year"
+    , temporal = "orthogonal"
+    , contemporaneous = "orthogonal"
+    , verbose = TRUE
+    , scale = F
+  )
+  save(m, file = sprintf("%s/04_results/01_mlVAR/%s-%s-lag%s.RData"
+                         , wd, study, type, lag))
+  return(NULL)
+}
+```
+
+## Run Models  
+```{r run mlvar}
+prep_fun <- function(d){
+  cutoff <- 5
+  na_test <- apply(d, 2, function(x) sum(!is.na(x)))
+  if(any(na_test < cutoff)) return(NA) else return(d)
+}
+
+net_nested <- tibble(Study = rep(c("GSOEP", "SHP", "BHPS", "LISS", "HILDA"), each = 2)
+       , hrmnzn = rep(c("Harmonized", "Unharmonized"), times = 5)
+       , data = list(
+         gsoep   %>% select(SID, year, amtleis, health:house, income:work)
+         , gsoep %>% select(SID, year, amtleis:work)
+         , shp   %>% select(SID, year, amtleis, health:house, income:lifesat, work)
+         , shp   %>% select(SID, year, amtleis:income, social:work)
+         , bhps  %>% select(SID, year, amtleis:lifesat, work)
+         , bhps  %>% select(SID, year, amtleis:work)
+         , liss  %>% select(SID, year, amtleis, house:lifesat, work)
+         , liss  %>% select(SID, year, amtleis:work)
+         , hilda %>% select(SID, year, amtleis, health:house, income:lifesat, work)
+         , hilda %>% select(SID, year, amtleis:work)
+       )
+) %>%
+  filter(hrmnzn == "Harmonized") %>%
+  mutate(data = map(data, ~(.)  %>% 
+      mutate(SID = as.character(SID)) %>% 
+      arrange(SID, year) %>% 
+      group_by(SID) %>% 
+      nest() %>% 
+      ungroup() %>%
+      mutate(data = map(data, prep_fun)) %>%
+      filter(!is.na(data))))
+
+rm(list = ls()[!ls() %in% c("data_path", "mlVAR_call", "mlVAR_fun", "net_nested", "wd")])
+gc()
+
+net_nested <- net_nested %>% 
+  filter(Study == "LISS") %>%
+  mutate(data = map(data, ~(.) %>% 
+                      mutate(data = map(data, ~(.) %>% filter(complete.cases(.)))) %>%
+                      filter(map_dbl(data, nrow) >= 6) %>%
+                      unnest(data) %>%
+                      arrange(SID, year)),
+         m = pmap(list(data, Study, hrmnzn), mlVAR_call))
+```
+
+## Load Results  
+```{r}
+loadRData <- function(fileName, type){
+#loads an RData file, and returns it
+    path <- sprintf("%s/04_results/01_mlVAR/%s", wd, fileName)
+    load(path)
+    get(ls()[ls() == type])
+}
+
+net_nested <- tibble(file = sprintf("%s/04_results/01_mlVAR", wd) %>% list.files()) %>%
+  filter(!grepl("pop_", file)) %>%
+  mutate(m = map(file, ~loadRData(., "m"))) %>%
+  separate(file, c("Study", "hrmnzn", "lag"))
+```
+
+
+## Plots  
+```{r}
+plot_fun <- function(x, type, sd = F, sig = "hide", study, h, lag){
+  groups <- list(
+    lifesat = which(x$fit$var == "lifesat")
+    , other = seq(1:nrow(x$fit))[-which(x$fit$var == "lifesat")]
+    )
+  ttl <- sprintf("\n%s: %s %s", study, h, lag)
+  plot.res <- plot(x
+                   , type
+                   , layout = "spring"
+                   , groups = groups
+                   , nonsig = sig
+                   , curve = -1
+                   , legend = FALSE
+                   , SD = sd
+                   , details = FALSE
+                   , mar = rep(10, 4)
+                   , border.width = 2.5
+                   # , title =  ttl
+                   # , threshold = .01
+                   , loop = .7
+                   , node.width = 1.6
+                   , edge.width = 1
+                   , asize = 5
+                   , label.font = 2
+                   , label.fill.vertical = 1
+                   , label.fill.horizontal = 1
+                   , edge.color = "blue"
+                   , DoNotPlot = TRUE
+                   , color = c(RColorBrewer::brewer.pal(3, "Set3")[1], "white")
+                   )
+  if(sd == F){
+  plot.res$graphAttributes$Edges$lty[plot.res$Edgelist$weight < 0] <- 2
+  plot.res$graphAttributes$Edges$color <-
+    ifelse(plot.res$Edgelist$weight <.02, "thistle2",
+    ifelse(plot.res$Edgelist$weight <.04, "mediumorchid", "midnightblue"))
+  }
+  # plot(plot.res); title(ttl)
+  return(list(p = plot.res, ttl = ttl))
+}
+
+net_nested <- net_nested %>%
+  mutate(plot = pmap(list(x = m, type = "temporal", sd = F, sig = "hide", study = Study, h = hrmnzn, lag = lag)
+                     , plot_fun))
+
+plot_print <- function(l){
+  plot(l$p); title(l$ttl)
+}
+
+pdf(file = sprintf("%s/04_results/04_figures/fig-1-mlVARs.pdf", wd)
+    , width = 8, height = 6)
+par(mfrow = c(2,3), oma=c(0,0,2,0))
+net_nested %>% mutate(p = map(plot, plot_print))
+dev.off()
+```
+
+## Structure Comparisons
+### Full Models
+```{r}
+net_nested <- net_nested %>%
+  mutate(summary = map(m, ~summary(.))
+         , lagged = map(summary, ~(.)$temporal))
+
+lagged_edges <- net_nested %>% 
+  select(Study, hrmnzn, lagged) %>%
+  unnest(lagged) %>%
+  select(from, to, fixed, Study) %>%
+  spread(key = Study, value = fixed) %>%
+  unite(path, from, to, sep = "->")
+lagged_mat <- lagged_edges %>% select(-path) %>% as.matrix()
+rownames(lagged_mat) <- lagged_edges$path
+
+r <- cor(lagged_mat, use = "pairwise")
+r[upper.tri(r, diag = T)] <- NA
+r[lower.tri(r, diag = F)] <- sprintf("%.2f", r[lower.tri(r, diag = F)])
+diag(r) <- "--"
+r %>% data.frame() %>% rownames_to_column("Study") %>%
+  kable(., "html"
+        , caption = "Cross-Study Structure Comparisons of Harmonized, Lag 1 Pathways") %>%
+  kable_styling(full_width = F)
+```
+
+## Centrality  
+```{r}
+net_nested <- net_nested %>%
+  mutate(centrality = map(lagged, ~centrality_auto((.) %>% filter(P < .05) %>% select(from, to, fixed)))
+         , centrality = map(centrality, ~(.)$node.centrality)
+         , cent_plot = map(lagged, ~centralityPlot((.) %>% select(from, to, fixed))))
+```
+
+```{r}
+save(net_nested, file = sprintf("%s/04_results/01_mlVAR/pop_results.RData", wd))
+net_nested <- net_nested %>% select(Study, hrmnzn, plot, lagged, centrality, cent_plot)
+save(net_nested, file = sprintf("%s/04_results/01_mlVAR/pop_results_small.RData", wd))
+```
+
+
+# Person Level
+## Run Models
+```{r, eval = F}
+idio_nested <- tibble(Study = rep(c("GSOEP", "SHP", "BHPS", "LISS", "HILDA"), each = 2)
+       , hrmnzn = rep(c("Harmonized", "Unharmonized"), times = 5)
+       , data = list(
+         gsoep   %>% select(SID, year, amtleis, health:house, income:work)
+         , gsoep %>% select(SID, year, amtleis:work)
+         , shp   %>% select(SID, year, amtleis, health:house, income:lifesat, work)
+         , shp   %>% select(SID, year, amtleis:income, social:work)
+         , bhps  %>% select(SID, year, amtleis:lifesat, work)
+         , bhps  %>% select(SID, year, amtleis:work)
+         , liss  %>% select(SID, year, amtleis, house:lifesat, work)
+         , liss  %>% select(SID, year, amtleis:work)
+         , hilda %>% select(SID, year, amtleis, health:house, income:lifesat, work)
+         , hilda %>% select(SID, year, amtleis:work)
+       )
+) %>%
+  mutate(data = map(data, ~(.) %>% arrange(SID, year) %>% select(-year) %>% group_by(SID) %>% nest() %>% ungroup())) %>%
+  unnest(data) %>%
+  filter(map_dbl(data, nrow) >= 8)
+
+gVAR_fun <- function(d, SID, study, type, perc){
+  print(sprintf("%s Subject %s, %.2f complete", study, SID, perc))
+  n <- nrow(d)
+  cutoff <- ifelse(study == "GSOEP", 15, 5)
+  na_test <- apply(d, 2, function(x) sum(is.na(x) == F))
+  sd_test <- apply(d, 2, function(x) sd(x, na.rm = T) == 0)
+  na_test <- which(na_test < cutoff | sd_test == TRUE)
+  if(length(na_test >= 1)){d <- select(d, -na_test)}
+  # dat <- dat[complete.cases(dat),]
+  gamma <- 0; lambda <- seq(.01, n*.01, length.out = 10) #c(n*01, n*.02) 
+  fit <-
+    graphicalVAR(d
+                 , gamma = gamma
+                 , maxit.in = 1000
+                 , maxit.out = 1000
+                 , lambda_beta = lambda
+                 , lambda_kappa = lambda[1]
+                 , verbose = T
+                 , scale = F
+                 , centerWithin = F
+                 , likelihood = "unpenalized"
+                 )
+  save(fit, file = sprintf("%s/04_results/02_graphicalVAR/models/%s/%s/%s.RData"
+                           , wd, type, study, SID))
+  fit <- list(PCC = fit$PCC, PDC = fit$PDC)
+  save(fit, file = sprintf("%s/04_results/02_graphicalVAR/small/%s/%s/%s.RData"
+                           , wd, type, study, SID))
+  gc()
+  return(T)
+}
+# done <- crossing(Study = c("GSOEP", "BHPS", "SHP")
+#                  , hrmnzn = c("Harmonized", "Unharmonized")) %>%
+#   mutate(path = sprintf("%s/04_results/02_graphicalVAR/models/%s/%s",wd, hrmnzn, Study),
+#          SID = map(path, list.files)) %>%
+#   select(-path) %>%
+#   unnest(SID) %>%
+#   mutate(SID = as.numeric(str_remove_all(SID, ".RData"))
+#          , done = "done")
+# plan(multiprocess(workers = 3L))
+net_nested <- net_nested %>%
+  # full_join(done) %>%
+  # filter(is.na(done)) %>%
+  arrange(hrmnzn, Study) %>%
+  filter(row_number() %in% 1:1000) %>%
+  mutate(perc = row_number()/n()*100) %>%
+  filter(!(Study == "BHPS" & SID %in% 
+    c("28575", "149611", "276767", "280165", "300567", "410051", "499811"))) %>%
+  mutate(gVAR_fit = 
+           # future_pmap(
+           pmap(
+             list(data, SID, Study, hrmnzn, perc)
+             , possibly(gVAR_fun, NA_real_)
+             # , .options = furrr_options(
+             #   globals = c("gVAR_fun", "wd")
+             #   , packages = c("plyr", "tidyverse", "graphicalVAR")
+             #   )
+             )
+         )
+# closeAllConnections()
+```
+
+## Load Results 
+```{r}
+loadRData <- function(fileName, type, study){
+#loads an RData file, and returns it
+    path <- sprintf("%s/04_results/02_graphicalVAR/small/Harmonized/%s/%s", wd, study, fileName)
+    load(path)
+    get(ls()[ls() == type])
+}
+
+idio_nested <- tibble(Study = c("BHPS", "GSOEP", "HILDA", "LISS", "SHP")
+       , SID = map(Study, ~list.files(sprintf("%s/04_results/02_graphicalVAR/small/Harmonized/%s", wd, .)))) %>%
+  unnest(SID) %>%
+  mutate(m = map2(SID, Study, ~loadRData(.x, "fit", .y)),
+         SID = str_remove_all(SID, ".RData"))
+```
+
+## Extract Coefficients  
+```{r}
+beta_fun <- function(fit, SID){
+  PDC <- fit$PDC
+  from <- row.names(PDC)
+  PDC.long <- tbl_df(PDC) %>%
+    mutate(from = from,
+           type = "Temporal") %>%
+    gather(key = to, value = weight, everything(), -from, -type)
+}
+
+kappa_mat_fun <- function(fit){fit$PCC}
+
+kappa_long_fun <- function(fit){
+  PCC <- fit$PCC
+  PCC[lower.tri(PCC, diag = T)] <- NA
+  vars <- rownames(PCC)
+  PCC.long <- tbl_df(PCC) %>%
+    mutate(Var1 = vars,
+           type = "Contemporaneous") %>%
+    gather(key = Var2, value = weight, -Var1, -type) %>%
+    filter(!is.na(weight)) %>%
+    unite(var, Var1, Var2, sep = ".", remove = F)
+}
+
+idio_nested <- idio_nested %>%
+  filter(!is.na(m)) %>%
+  mutate(beta = map2(m, SID, beta_fun),
+         kappa_mat = map(m, kappa_mat_fun),
+         kappa = map(m, kappa_long_fun))
+```
+
+##Structure Comparisons
+```{r}
+profile_cor_fun <- function(id, study){
+  id <- id %>% 
+    select(SID, from, to, weight) %>%
+    unite(path, from, to, sep = "->") %>%
+    pivot_wider(names_from = "SID", values_from = "weight")
+  pop <- lagged_edges %>% 
+    select(path, one_of(study))
+  full <- id %>% full_join(pop)
+  cor(full %>% select(-path, -contains(study))
+      , full %>% select(contains(study))
+      , use = "pairwise") %>%
+    data.frame() %>%
+    setNames("r") %>%
+    rownames_to_column("SID") %>%
+    as_tibble()
+}
+
+edge_fun <- function(id, study){
+  id_mat <- id %>% 
+    select(SID, from, to, weight) %>%
+    unite(path, from, to, sep = "->") %>%
+    pivot_wider(names_from = "SID", values_from = "weight")
+  pop_mat <- net_nested %>%
+    filter(Study == study) %>%
+    select(lagged) %>%
+    unnest(lagged) %>% 
+    mutate(fixed = ifelse(P < .05, fixed, 0)) %>% 
+    unite(path, from, to, sep = "->") %>%
+    select(path, pop = fixed) 
+  full_mat <- id_mat %>% full_join(pop_mat)
+  res <- sapply(full_mat %>% select(-path, -pop), function(x) {
+    nEdges <- length(x)
+    nEdgesOrig <- sum(full_mat$pop != 0, na.rm = T)
+    nShared <- sum(full_mat$pop != 0 & x != 0, na.rm = T)
+    nMissing <- sum(full_mat$pop == 0 & x == 0, na.rm = T) # missing edges
+    tibble(prop_shared = nShared/nEdgesOrig,
+         prop_missing = nMissing/(nEdges  - nEdgesOrig),
+         prop_repl = prop_shared + prop_missing)
+  }) %>%
+    t() %>%
+    data.frame() %>%
+    rownames_to_column("SID") %>%
+    as_tibble() %>%
+    unnest(cols = c(prop_shared, prop_missing, prop_repl))
+  return(res)
+}
+
+cong_procors <- idio_nested %>%
+  select(Study, SID, beta) %>%
+  group_by(Study) %>%
+  nest() %>%
+  ungroup() %>%
+  mutate(data = map(data, ~(.) %>% unnest(beta)),
+         temp_procor = map2(data, Study, profile_cor_fun),
+         temp_match = map2(data, Study, edge_fun))
+cong_procors <- cong_procors %>% select(-data)
+save(cong_procors, file = sprintf("%s/04_results/congruence_cor.RData", wd))
+
+cong_procor <- cong_procors %>% 
+  select(-data) %>%
+  unnest(temp_procor) 
+
+cong_procor %>%
+  group_by(Study) %>%
+  summarise(mean = fisherz2r(mean(fisherz(r), na.rm = T)),
+            sd = fisherz2r(sd(fisherz(r), na.rm = T)),
+            max = max(r, na.rm = T), 
+            min = min(r, na.rm = T),
+            median = median(r, na.rm = T))
+
+cong_procor %>%
+  ggplot(aes(x = r, y = Study, fill = Study)) + 
+  # geom_density(color = "black", alpha = .25) +
+    ggridges::geom_density_ridges(alpha = .5) + 
+    geom_vline(aes(xintercept = 0), linetype = "dashed") + 
+    # facet_grid(.~Study) +  +
+    scale_x_continuous(limits = c(-1,1), breaks = seq(-1,1,1)) +
+    labs(x = "Correlation", y = NULL) +
+    theme_classic() + 
+    theme(legend.position = "none"
+          , axis.text = element_text(face = "bold", size = rel(1.5))
+          , axis.title = element_text(face = "bold", size = rel(1.5)))
+
+ggsave(sprintf("%s/04_results/04_figures/congruence_cor.pdf", wd), width = 6, height = 9)
+```
+
+## Centrality  
+```{r}
+centrality_direction <- function(edge_list, type){
+  if(type == "temporal"){
+    varnames <- unique(edge_list$from)
+    df <- tbl_df(matrix(rep(NA, 9 * length(varnames)), ncol = 9)) %>%
+      setNames(c("var", "inDegreeNeg", "inDegreePos", "inStrengthNeg", "inStrengthPos",
+                 "outDegreeNeg", "outDegreePos", "outStrengthNeg", "outStrengthPos"))
+    for(i in 1:length(varnames)){
+      var1 <- varnames[i]
+      df[i,] <- edge_list %>% 
+        filter(from == var1 | to == var1) %>%
+        mutate(direction = ifelse(from == var1, "out", "in"),
+               Variable = var1) %>%
+        group_by(direction, Variable) %>%
+        summarize(StrengthPos = sum(weight[weight > 0], na.rm = T),
+                  StrengthNeg = sum(weight[weight < 0], na.rm = T),
+                  DegreePos = sum(weight > 0),
+                  DegreeNeg = sum(weight < 0)) %>%
+        gather(key = type, value = value, StrengthPos:DegreeNeg) %>%
+        unite(comb, direction, type, sep = "") %>%
+        spread(key = comb, value = value)
+    }
+    return(df)
+  } else {
+    varnames <- unique(c(edge_list$Var1, edge_list$Var2))
+    df <- tbl_df(matrix(rep(NA, 3 * length(varnames)), ncol = 5)) %>%
+      setNames(c("Variable", "Negative", "Positive"))
+    for(i in 1:length(varnames)){
+      var1 <- varnames[i]
+      df[i,] <- edge_list %>% 
+        filter(Var1 == var1 | Var2 == var1) %>%
+        mutate(Variable = var1) %>%
+        group_by(Variable) %>%
+        summarize(Positive = sum(weight[weight > 0], na.rm = T),
+                  Negative = sum(weight[weight < 0], na.rm = T))
+    }
+    return(df)
+  }
+}
+
+centralityList <- function(x, gVAR, SID, dataset) {
+  print(sprintf("%s Subject %s", as.character(dataset), SID))
+      centrality <- centrality_auto(data.frame(select(x, from, to, weight)))
+      mat <- gVAR$PDC
+      diag(mat) <- 0
+      varnames <- as.character(unique(x$from))
+      degree <- tibble(var = row.names(mat), 
+                       InDegree = colSums(mat != 0), 
+                       OutDegree = rowSums(mat != 0))
+      df <- tbl_df(centrality$node.centrality %>% mutate(var = varnames)) %>%
+      full_join(degree)
+      return(df)
+}
+
+beta_centrality_fun <- function(x) {
+  data <- x %>%
+    select(from, to, weight) %>%
+    mutate(weight = as.numeric(weight))
+  centrality <- centrality_auto(data.frame(data))
+  outdegree <- degree(igraph::as.igraph(qgraph(data, DoNotPlot = TRUE), attributes = TRUE), mode = c("out"))
+  indegree <- degree(igraph::as.igraph(qgraph(data, DoNotPlot = TRUE), attributes = TRUE), mode = c("in"))
+  df <- data.frame(var = rownames(centrality$node.centrality), 
+                   centrality$node.centrality,
+                   InDegree = indegree,
+                   OutDegree = outdegree,
+                   Degree = indegree + outdegree)
+}
+```
+
+```{r, eval = F}
+# calculate centrality for each subject for each wave and save them to a list #
+idio_nested <- idio_nested %>%
+  mutate(#beta_centrality = map(beta, possibly(beta_centrality_fun, NA_real_)), 
+         #beta_signed_centrality = map(beta, possibly(~centrality_direction(., "temporal"), NA_real_)),
+         beta_centrality = pmap(list(beta, m, SID, Study), 
+                                centralityList))
+save(idio_nested, file = sprintf("%s/04_results/02_graphicalVAR/idio_nested.RData", wd))
+idio_plots <- idio_nested %>% select(Study, SID, temp_plot, beta_centrality)
+save(idio_plots, file = sprintf("%s/04_results/02_graphicalVAR/idio_plots.RData", wd))
+```
+
+```{r}
+beta_centrality <- idio_nested %>%
+  filter(!is.na(beta_centrality)) %>%
+  select(Study, SID, beta_centrality) %>%
+  unnest(beta_centrality) %>%
+  mutate(type = "Lagged") %>%
+  select(Study, SID, type, var, InStrength, OutStrength, InDegree, OutDegree) %>%
+  gather(key = measure, value = value, InStrength, OutStrength, na.rm = T) %>%
+  group_by(measure, SID, Study) %>%
+  mutate(asc_rank = dense_rank(desc(value)),
+         desc_rank = dense_rank(value),
+         z = as.numeric(scale(value, center = T, scale = T))) %>%
+  ungroup() %>%
+  group_by(measure, var, Study) %>%
+  mutate(rank_var = dense_rank(desc(value))) %>% 
+  ungroup()
+
+# beta_signed_centrality <- net_nested %>%
+#   unnest(beta_signed_centrality) %>%
+#   mutate(type = "Temporal",
+#          SID = factor(SID)) %>%
+#   gather(key = measure, value = value, contains("Strength")) %>%
+#   group_by(measure, SID, dataset) %>%
+#   mutate(asc_rank = dense_rank(desc(value)),
+#          desc_rank = dense_rank(value),
+#          z = as.numeric(scale(value))) %>%
+#   ungroup()
+
+# Top Down Only
+pure_top_down_SID <- beta_centrality %>%
+  filter(var == "lifesat" & measure %in% c("InStrength", "OutStrength") &
+        (OutDegree >= 4 & InDegree == 0) &
+        (asc_rank[measure == "OutStrength"] %in% 1 & abs(z) > 1) &
+        (desc_rank[measure == "InStrength"] %in% 1 & abs(z) > 1)) %>%
+  mutate(group = "top down")
+
+# Bottom Up
+pure_bottom_up_SID <- beta_centrality %>%
+  filter(var == "lifesat" & measure %in% c("InStrength", "OutStrength") &
+        (InDegree >= 4 & OutDegree == 0) &
+        (desc_rank[measure == "OutStrength"] %in% 1 & abs(z) > 1) &
+        (asc_rank[measure == "InStrength"] %in% 1 & abs(z) > 1)) %>%
+  mutate(group = "bottom up")
+
+both_SID <- beta_centrality %>%
+  filter(var == "lifesat" & measure %in% c("InStrength", "OutStrength") &
+        (OutDegree >= 3 & InDegree >= 3) &
+        (asc_rank[measure == "OutStrength"] %in% 1:2 & abs(z) > 1) &
+        (asc_rank[measure == "InStrength"] %in% 1:2 & abs(z) > 1)) %>%
+  mutate(group = "both")
+
+neither_SID <- beta_centrality %>%
+  filter(var == "lifesat" & measure %in% c("InStrength", "OutStrength") &
+        (OutDegree < 2 & InDegree < 2) &
+        (desc_rank[measure == "OutStrength"] %in% 1 & abs(z) > 1) &
+        (desc_rank[measure == "InStrength"] %in% 1 & abs(z) > 1)) %>%
+  mutate(group = "neither")
+```
+
+
+
+##Plots
+```{r, eval = F}
+edge_colors <- RColorBrewer::brewer.pal(8, "Purples")[c(3,5,7)]
+plot_fun <- function(data, SID, type, dataset){
+  x <- if(type == "Temporal") data$PDC else data$PCC
+  # nvar <- dim(data_mod)[2]
+  groups <- list(
+    lifesat = which(rownames(x) == "lifesat")
+    , other = seq(1:nrow(x))[-which(rownames(x) == "lifesat")]
+    )
+  plot <- qgraph(x
+                 , layout = "spring"
+                 , title = sprintf("%s: %s for S%s", dataset, type, SID)
+                 , loop = .7
+                 , node.width = 1.4
+                 , edge.width = 1
+                 , label.font = 2
+                 , label.fill.vertical = 1
+                 , label.fill.horizontal = 1
+                 , edge.color = "black"
+                 , groups = groups
+                 , color = c(RColorBrewer::brewer.pal(3, "Set3")[1], "white")
+                 , legend = F
+                 , DoNotPlot = TRUE
+                 , mar = c(4,4,4,4)
+                 , asize = 6
+                 , border.width = 2.5
+                 )
+  plot$graphAttributes$Edges$lty[plot$Edgelist$weight < 0] <- 2
+  plot$graphAttributes$Edges$color <-
+    ifelse(abs(plot$Edgelist$weight) <.1, edge_colors[1],
+    ifelse(abs(plot$Edgelist$weight) <.2, edge_colors[2], edge_colors[3]))
+  return(plot)
+}
+
+library(animation)
+idio_nested <- idio_nested %>%
+  mutate(
+    temp_plot = pmap(
+      list(m, SID, "Temporal", Study)
+      , possibly(plot_fun, NA_real_)
+      ),
+    contemp_plot = pmap(
+      list(m, SID, "Contemporaneous", Study)
+      , possibly(plot_fun, NA_real_))
+    )
+save(idio_nested, file = sprintf("%s/04_results/02_graphicalVAR/idio_nested.RData", wd))
+```
+
+### GIFS  
+```{r}
+setwd("~/Box/network/other projects/swb networks/04_results/04_figures/01_gifs")
+library(animation)
+draw.a.plot <-  function(x){
+  plot(temp_plots[[x]])
+}
+
+# Pure Top Down - Highest in OutStrength, Lowest in InStrength
+loop.animate <- function() {
+    lapply(names(temp_plots), function(i) {draw.a.plot(i)})
+}
+
+gif_fun <- function(d, study){
+  temp_plots <- d$temp_plot
+  names(temp_plots) <- d$SID
+  temp_plots <- temp_plots[sample(d$SID, 100)]
+  saveGIF(loop.animate()
+          , interval = 2
+          , movie.name = sprintf("%s/04_results/04_figures/01_gifs/%s_full.gif", wd, study)
+          , ani.width = 500
+          , ani.height = 500
+          )
+}
+
+idio_nested %>%
+  select(Study, SID, temp_plot) %>%
+  group_by(Study) %>%
+  nest() %>%
+  ungroup() %>%
+  mutate(p = map2(data, Study, gif_fun))
+
+# Pure Bottom Up - Highest in InStrength, Lowest in OutStrength
+loop.animate <- function() {
+    lapply(as.character((pure_bottom_up_SID %>% filter(dataset == "GSOEP"))$SID), function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="gsoep_bottom_up_beta_plots.gif", ani.width = 500, ani.height = 500)
+
+
+# Pure Top Down - Highest in OutStrength, Lowest in InStrength
+loop.animate <- function() {
+    lapply(as.character((both_SID %>% filter(dataset == "GSOEP"))$SID), function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="gsoep_mixed_bottom_top_beta_plots.gif", ani.width = 500, ani.height = 500)
+
+# Pure Bottom Up - Highest in InStrength, Lowest in OutStrength
+loop.animate <- function() {
+    lapply(as.character((neither_SID %>% filter(dataset == "GSOEP"))$SID), function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="gsoep_weird_independent_beta_plots.gif", ani.width = 500, ani.height = 500)
+```
+
+```{r}
+idio_nested %>%
+  filter(!is.na(beta_centrality)) %>%
+  select(Study, SID, beta_centrality) %>%
+  unnest(beta_centrality) %>%
+  mutate(type = "Temporal") %>%
+  group_by(SID, Study) %>%
+  mutate_at(vars(InStrength, OutStrength), funs(z = as.numeric(scale(.)))) %>%
+  ungroup() %>%
+  filter(var == "lifesat") %>%
+  ggplot(aes(x = InStrength_z, y = OutStrength_z)) + 
+    # geom_hex() +
+  stat_density2d(aes(fill = ..level..), geom = "polygon", n = 100) +#, h = .2) +
+  # geom_density_2d() +
+  xlim(c(-2.5,2.5)) + ylim(c(-2.5,2.5)) +
+  geom_hline(aes(yintercept = 0)) + 
+  geom_vline(aes(xintercept = 0)) +
+  annotate("text", x = -2.5, y = -2.5, label = "Neither", hjust = 0) +
+  annotate("text", x = -2.5, y =  2.5, label = "Top Down", hjust = 0) +
+  annotate("text", x =  2.5, y = -2.5, label = "Bottom Up", hjust = 1) +
+  annotate("text", x =  2.5, y =  2.5, label = "Both", hjust = 1) +
+  labs(x = "Standardized In Strength (Domain \u2192 General)", y = "Standardized Out Strength\n(General \u2192 Domain)",
+       fill = "Density") +
+  facet_grid(.~Study) + 
+  theme_classic() +
+  theme(plot.title  = element_text(face = "bold", hjust = .5),
+        axis.title = element_text(face = "bold"),
+        axis.text = element_text(face = "bold"),
+        legend.position = "bottom", 
+        strip.text = element_text(face = "bold", size = rel(1.2)))
+ggsave(file = sprintf("%s/04_results/04_figures/fig-4-density.pdf", wd)
+       , width = 12, height = 5)
+```
+
+## Top Down v. Bottom Up Comparisons  
+
+### GSOEP  
+```{r}
+comp_fun <- function(beta){
+  vars <- unique(beta$from)
+  beta <- beta %>% 
+    filter((from == "lifesat" | to == "lifesat") & from != to) %>%
+    mutate(direction = ifelse(from == "lifesat", "topdown", "bottomup"),
+           var = ifelse(direction == "topdown", to, from)) %>%
+    select(-(from:to)) %>%
+    spread(key = direction, value = weight) %>%
+    mutate(diff = topdown-bottomup)
+  return(beta)
+}
+
+idio_nested <- idio_nested %>%
+  mutate(diff = map(beta, possibly(comp_fun, NA_real_)))
+
+idio_nested %>%
+  select(Study, SID, diff) %>%
+  unnest(diff) 
+
+beta_centrality %>%
+  filter(var == "lifesat" & 
+        (measure == "InStrength" | measure == "OutStrength")) %>%
+  select(SID, measure, value, Study) %>%
+  spread(key = measure, value = value) %>%
+  right_join(
+    idio_nested %>% select(Study, SID, diff) %>% unnest(diff) 
+  ) %>%
+  ggplot(aes(x = InStrength, y = OutStrength, fill = diff)) + 
+  geom_raster() + 
+  facet_wrap(Study~var)
+```
+
+
+# Correlates  
+
+## Data Setup  
+```{r}
+data_setup_fun <- function(d, study){
+  vars <- c("DEP", "grsWages", "occPrstg", "PhysFunc", "SRhealth", "SS", "loneliness")
+  cols <- vars[vars %in% colnames(d)]
+  d %>% 
+    mutate_at(vars(all_of(cols)), ~as.numeric(scale(.))) %>%
+    mutate(age = age - 35,
+           education = education - 12,
+           SID = as.character(SID)) %>%
+    pivot_longer(cols = - SID
+                 , names_to = "o_name"
+                 , values_to = "o_value"
+                 , values_drop_na = T) %>%
+    right_join(beta_centrality %>% 
+                 filter(Study == study & var == "lifesat" & 
+                          (measure == "InStrength" | measure == "OutStrength")) %>%
+                 select(SID, measure, z)) %>%
+    group_by(o_name, measure) %>%
+    nest() %>%
+    ungroup()
+}
+
+
+nested_corr <- tribble(
+  ~Study, ~data, 
+  "BHPS" , bhps_corr  %>% select(-m_year, -yearBrth),
+  "GSOEP", gsoep_corr %>% select(-m_year, -yearBrth),
+  "HILDA", hilda_corr %>% select(-m_year, -yearBrth),
+  "LISS" , liss_corr  %>% select(-m_year, -yearBrth),
+  "SHP"  , shp_corr   %>% select(-m_year, -yearBrth)
+) %>%
+  mutate(data = map2(data, Study, data_setup_fun)) %>%
+  unnest(data) %>%
+  group_by(o_name, measure) %>%
+  nest() %>%
+  ungroup() %>%
+  mutate(data = map(data, ~(.) %>% unnest(data)))
+
+save_fun <- function(d, o, m){
+  save(d, file = sprintf("%s/01_data/02_correlates/%s_%s.RData", wd, o, m))
+  return(NULL)
+}
+
+nested_corr %>% mutate(s = pmap(list(data, o_name, measure), save_fun))
+```
+
+## Zero-Order  
+```{r}
+corr_fun <- function(d){
+  r <- cor.ci(d %>% select(-SID), use = "pairwise")
+  r2 <- print(r) %>%
+    data.frame() %>%
+    rownames_to_column("path") %>%
+    filter(grepl("InStr", path) | grepl("OtStr", path)) %>%
+    separate(path, c("o_name", "measure"), sep = "-") %>%
+    filter(!(o_name == "InStr" & measure == "OtStr")) %>%
+    select(o_name, measure, lower.emp, upper.emp)
+  return(r2)
+}
+
+nested_zero_corr <- nested_corr %>% 
+  unnest(data) %>%
+  # filter(!is.na(o_name)) %>%
+  pivot_wider(names_from = "o_name"
+              , values_from = "o_value") %>%
+  pivot_wider(names_from = "measure"
+              , values_from = "z") %>%
+  group_by(Study) %>%
+  nest() %>%
+  ungroup() %>%
+  mutate(r = map(data, corr_fun))
+
+nested_zero_corr %>%
+  select(-data) %>%
+  unnest(r) %>%
+  filter(sign(lower.emp) == sign(upper.emp))
+```
+
+
+## Initialize Models  
+```{r}
+load(sprintf("%s/01_data/02_correlates/DEP_InStrength.RData", wd))
+Prior <-  c(set_prior("cauchy(0,1)", class = "sd"),
+              set_prior("student_t(3, 0, 2)", class = "b"),
+              set_prior("student_t(3, 0, 5)", class = "Intercept"))
+Iter <- 2000; Warmup <- 1000; treedepth <- 20
+d <- d %>%
+   group_by(Study) %>%
+   nest() %>%
+   ungroup() %>%
+   mutate(data = map(data, ~(.) %>% filter(row_number() %in% sample(1:nrow(.), 100, replace = F)))) %>%
+   unnest(data)
+
+init <- brm(formula = z ~ o_value + (1 + o_value | Study)
+             , data = d
+             , iter = Iter
+             , warmup = Warmup
+             , cores = 8
+           )
+save(init, file = sprintf("%s/04_results/05_correlates/brms_small_cont.RData", wd))
+
+load(sprintf("%s/01_data/02_correlates/gender_InStrength.RData", wd))
+d <- d %>%
+  group_by(Study, o_value) %>%
+  nest() %>%
+  ungroup() %>%
+  mutate(data = map(data, ~(.) %>% filter(row_number() %in% sample(1:nrow(.), 50, replace = F)))) %>%
+  unnest(data) %>%
+  mutate(o_value = as.factor(o_value))
+
+init <- brm(formula = z ~ o_value + (1 + o_value | Study)
+             , data = d
+             , iter = Iter
+             , warmup = Warmup
+             , cores = 8
+           )
+save(init, file = sprintf("%s/04_results/05_correlates/brms_small_fac.RData", wd))
+rm(list = c("init", "Prior", "Warmup", "d"))
+```
+
+
+## Model Function  
+
+```{r}
+brms_call <- function(outcome, measure){
+  # load the data
+  load(sprintf("%s/01_data/02_correlates/%s_%s.RData", wd, outcome, measure))
+  
+  # load the compiled brms models and factorize categorical variables
+  if(outcome %in%  c("DEP", "grsWages", "occPrstg", "PhysFunc", "SRhealth", "SS"
+                     , "age", "education", "CC", "numKids", "loneliness")){
+    load(sprintf("%s/04_results/05_correlates/brms_small_cont.RData", wd))
+  } else{
+    load(sprintf("%s/04_results/05_correlates/brms_small_fac.RData", wd))
+    d <- d %>% mutate(o_value = factor(o_value))
+  }
+  
+  # set the priors
+  Prior <-  c(set_prior("cauchy(0,1)", class = "sd"),
+              set_prior("student_t(3, 0, 2)", class = "b"),
+              set_prior("student_t(3, 0, 5)", class = "Intercept"))
+  
+  # fit the model by updating the compiled model with new, full data sets
+  fit <- update(init
+                , newdata = d
+                , iter = 3000
+                , warmup = 1000
+                # , prior = Prior
+                , cores = 12)
+  save(fit, file = sprintf("%s/04_results/05_correlates/01_models/%s_%s.RData", wd, outcome, measure))
+  
+  # get model coefficients
+  fx <- broom.mixed::tidy(fit, probs = c(0.025, 0.975))
+  save(fx, file = sprintf("%s/04_results/05_correlates/02_fx/%s_%s.RData", wd, outcome, measure))
+  
+  # get study-specific effects
+  rx <- ranef(init, probs = c(0.025, 0.975))[[1]] %>% array_tree(3) %>%
+    tibble(names = names(.), data = .) %>%
+    mutate(data = map(data, ~(.) %>% data.frame %>%
+                        rownames_to_column("Study"))) %>%
+    unnest(data) %>%
+    as_tibble()
+  save(rx, file = sprintf("%s/04_results/05_correlates/03_rx/%s_%s.RData", wd, outcome, measure))
+  
+  # clean up the environment
+  rm(list = c("d", "init", "fit", "fx", "rx"))
+  gc()
+  return(T)
+}
+```
+
+## Run Models  
+```{r, eval = F}
+tibble(file = sprintf("%s/01_data/02_correlates", wd) %>% list.files()) %>%
+  # full_join(tibble(file = sprintf("%s/04_results/05_correlates/01_models", wd) %>% list.files(), done = "done")) %>%
+  # filter(is.na(done)) %>%
+  separate(file, c("o_name", "measure", "scrap")) %>%
+  filter(o_name %in% c("loneliness", "PhysFunc", "numKids")) %>%
+  mutate(m = map2(o_name, measure, possibly(brms_call, NA_real_)))
+```
+
+## Compile Results  
+```{r}
+loadRData <- function(fileName, type){
+    dir <- if(type == "fx") "02_fx" else "03_rx"
+#loads an RData file, and returns it
+    path <- sprintf("%s/04_results/05_correlates/%s/%s", wd, dir, fileName)
+    load(path)
+    get(ls()[ls() == type])
+}
+
+nested_corr <-tibble(file = sprintf("%s/04_results/05_correlates/02_fx", wd) %>% list.files()) %>%
+  separate(file, c("o_name", "measure", "scrap"), remove = F) %>%
+  mutate(fx = map(file, ~loadRData(., "fx")),
+         rx = map(file, ~loadRData(., "rx"))) %>%
+  select(-file, -scrap)
+```
+
+## Overall  
+```{r}
+nested_corr %>%
+  select(-rx) %>%
+  unnest(fx) %>%
+  filter(grepl("o_value", term) & effect == "fixed") %>%
+  select(-effect, -component, -group, -std.error) %>%
+  mutate(sig = ifelse(sign(conf.low) == sign(conf.high), "sig", "ns")
+         , CI = sprintf("[%.2f, %.2f]", conf.low, conf.high)
+         , b = sprintf("%.2f", estimate)) %>%
+  mutate_at(vars(b, CI), ~ifelse(sig == "sig", sprintf("<strong>%s</strong>", .), .)) %>%
+  select(o_name, measure, term, b, CI) %>%
+  pivot_wider(names_from = "measure"
+              , values_from = c("b", "CI")
+              , names_glue = "{measure}_{.value}")
+```
+
+```{r}
+nested_corr %>%
+  select(-fx) %>%
+  unnest(rx) %>%
+  filter(grepl("o_value", names)) %>%
+  select(-Est.Error) %>%
+  mutate(sig = ifelse(sign(Q2.5) == sign(Q97.5), "sig", "ns")
+         , CI = sprintf("[%.2f, %.2f]", Q2.5, Q97.5)
+         , b = sprintf("%.2f", Estimate)) %>%
+  mutate_at(vars(b, CI), ~ifelse(sig == "sig", sprintf("<strong>%s</strong>", .), .)) %>%
+  select(o_name, measure, term = names, b, CI)
+```
+

@@ -1,0 +1,1137 @@
+---
+title: "Untitled"
+author: "Emorie D Beck"
+date: "4/5/2017"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+source("~/Box/network/PAIRS/graphicalVAR_testing.R")
+```
+
+#Workspace
+##Packages
+```{r}
+library(qgraph)
+library(igraph)
+library(glasso)
+library(mlVAR)
+library(graphicalVAR)
+library(knitr)
+library(Rmisc)
+library(psych)
+library(magrittr)
+library(data.table)
+library(tidyverse)
+library(Matrix)
+library(RColorBrewer)
+
+data_path <- "~/Box/network/other projects/swb networks"
+```
+
+##Data
+###GSOEP
+```{r}
+# load(sprintf("%s/network data.RData", data_path))
+load(sprintf("%s/gsoep_LS_mlvar_models.RData", data_path))
+# load("~/Box/network/swb networks/gsoep_idiographic_networks.RData")
+```
+
+```{r}
+gsoep_codebook <- sprintf("%s/gsoep_codebook.xlsx", data_path) %>% readxl::read_excel()
+wd <- "~/Box/network/other projects/PCLE Replication"
+# create short function to read in separate files for each wave
+read_fun <- function(file, year){
+  print(year)
+  old.names <- (gsoep_codebook %>% filter(Year %in% c(year, 0)))$item
+  new.names <- (gsoep_codebook %>% filter(Year %in% c(year, 0)))$new_name
+  z <- haven::read_sav(sprintf("%s/data/sav_files/%sp.sav", wd, file)) %>%
+    left_join(haven::read_sav(sprintf("%s/data/sav_files/%spequiv.sav", wd, file))) %>%
+    select(one_of(old.names)) %>%
+    setNames(new.names) %>%
+    mutate_all(funs(mapvalues(., seq(-1,-7,-1), c(NA, 0, rep(NA,5)), warn_missing = F))) 
+}
+
+network <- tibble(
+  Year = seq(1984, 2015,1),
+  file = c(letters, paste("b", letters[1:6], sep = ""))) %>%
+  mutate(data = map2(file, Year, read_fun)) %>%
+  unnest(data)
+
+network <- haven::read_sav(sprintf("%s/data/sav_files/ppfad.sav", wd)) %>%
+  select(persnr, sex, gebjahr) %>% setNames(c("pid", "Sex", "DOB")) %>%
+  full_join(network) %>%
+  group_by(pid) %>% 
+  mutate(Age = max(Year) - max(DOB, na.rm = T)) #,
+         # Sex = factor(Sex, levels = c(1,2), labels = c("Male", "Female")))
+```
+
+
+```{r}
+network <- network %>% rename(lifesat = ls, house = dwelling)
+```
+
+###BHPS
+```{r}
+load(sprintf("%s/bhps.RData", data_path))
+load(sprintf("%s/bhps_LS_mlvar_models.RData", data_path))
+#load("~/Box Sync/network/swb networks/bhps_idiographic_networks.RData")
+```
+
+```{r, eval = F}
+wd <- sprintf("%s/UKDA-5151-spss/spss/spss12/", data_path)
+cols <- c("pid", "Sex", "DOB", "health", "income", "house", "partner", "work", 
+          "social", "amtleis", "useleis", "lifesat")
+
+library(haven)
+read_fun <- function(wave_num, wave){
+  letter <- letters[wave_num]
+  file <- paste(wd, letter, "indresp.sav", sep = "")
+  rep_c <- paste(toupper(letter), c("SEX", "HGBY"), sep = "")
+  data_in <- read_sav(file) %>%
+    select(PID, rep_c, contains("lfsat"), -contains("lfsatl")) 
+  colnames(data_in) <- cols
+  return(data_in)
+}
+
+bhps <- tibble(
+  wave_num = c(6:10, 13:18),
+  wave = 1990 + wave_num
+  ) %>%
+  mutate(data = map2(wave_num, wave, read_fun)) %>%
+  unnest(data)
+
+bhps_trim <- bhps %>% 
+  group_by(pid) %>%
+  arrange(pid, wave) %>%
+  mutate(beepvar = seq(1,n(),1)) %>%
+  ungroup() %>%
+  left_join(plyr::count(bhps$pid), by = c("pid" = "x")) %>%
+  filter(freq >= 5) %>%
+  select(-useleis) %>%
+  rename(leisure = amtleis) %>%
+  mutate_at(vars(health:lifesat), 
+    funs(mapvalues(., c(seq(-9,-7,1), -2, -1), to = rep(NA, 5)))) %>%
+  group_by(pid) %>%
+  mutate(Age = max(wave) - max(DOB)) #,
+         # Sex = factor(Sex, levels = c(1,2), labels = c("Male", "Female")))
+
+save(bhps, bhps_trim, file = sprintf("%s/bhps.RData", data_path))
+```
+
+###SHP
+```{r}
+load(sprintf("%s/shp.RData", data_path))
+load(sprintf("%s/shp_LS_mlvar_models.RData", data_path))
+#load("~/Box Sync/network/swb networks/shp_idiographic_networks.RData")
+```
+
+```{r, eval = F}
+wd <- sprintf("%s/SHP-Data-W1-W17-SPSS/", data_path)
+items <- tibble(item = c("AGE", "SEX", "C44", "C02", "YTH01", "YTH05", "YTH06", "YTH07", "YTH08", 
+                         "W92", "W93", "W94", "W229", "W230", "W228", "F01", "F02", 
+                         "F04", "QL04", "A05", "A06"),
+                name = c("Age", "Sex", "lifesat", "health", "school_sat", "school_learn",
+                         "school_teachers", "school_atmos", "school_parent", "income",
+                         "work_cond", "work_atmos", "work_interest", "work_amount",
+                         "work_gen", "partner_alone", "partner_tog", "partner_hwork", 
+                         "social", "amtleis", "useleis"))
+                
+library(haven)
+read_fun <- function(wave, year){
+  short_year <- str_sub(year, -2, -1)
+  items$items_in <- c(paste(items$item[c(1,2)], short_year, sep = ""), 
+                      paste("P", short_year, items$item[3:21], sep = ""))
+  file <- paste(wd, sprintf("W%i_%i/", wave, year), 
+                sprintf("SHP%s_P_USER.sav", short_year), sep = "")
+  data_in <- read_sav(file)
+  data_in <- data_in %>% select(IDPERS, contains("AGE"), contains("SEX"), one_of(items$items_in)) 
+  colnames(data_in) <- c("pid", filter(items, items_in %in% colnames(data_in))$name)
+  return(data_in)
+}
+
+shp <- tibble(
+  wave = 2:17,
+  year = 1998 + wave
+) %>%
+  mutate(data = map2(wave, year, read_fun)) %>%
+  unnest(data)
+
+shp_trim <- shp %>% 
+  gather(key = type, value = value, contains("partner_"), contains("school_")) %>%
+  separate(type, c("domain", "item"), sep = "_") %>%
+  group_by(domain, pid, wave) %>%
+  summarize(mean = mean(value, na.rm = T)) %>%
+  mutate(mean = ifelse(is.nan(mean) == T, NA, mean)) %>%
+  spread(key = domain, value = mean) %>%
+  full_join(select(shp, pid, Age, Sex, wave, year, lifesat, income, health,
+                   useleis, amtleis, social, work_gen)) %>%
+  rename(work = work_gen) %>%
+  group_by(pid) %>%
+  arrange(pid, wave) %>%
+  mutate(beepvar = seq(1,n(),1)) %>%
+  ungroup() %>%
+  left_join(plyr::count(shp$pid), by = c("pid" = "x")) %>%
+  filter(freq >= 5 & Age >= 16) %>%
+  select(pid, wave, year, beepvar, freq, Age, Sex, lifesat, -school, everything()) %>% 
+  select(-school, -useleis) %>%
+  rename(leisure = amtleis) #%>%
+  # mutate(Sex = factor(Sex, levels = c(1,2), labels = c("Male", "Female")))
+save(shp, shp_trim, file = sprintf("%s/shp.RData", data_path))
+```
+
+# Zero Order Relationships  
+```{r}
+r_fun <- function(dat){
+  dat <- dat %>% ungroup()
+  r <- cor(dat %>% select(-pid), use = "pairwise")
+  r[upper.tri(r, diag = T)] <- NA
+  nvar <- nrow(r)
+  tab <- data.frame(r) %>% mutate(v1 = paste(1:nvar, ". ", rownames(.), sep = "")) %>% 
+    select(v1, everything(), -Age) %>%
+    full_join(dat %>% select(-pid) %>% gather(key = v1, value = value) %>%
+                group_by(v1) %>%
+                summarize(mean = mean(value, na.rm = T), sd = sd(value, na.rm = T)) %>%
+                ungroup() %>%
+                mutate(v1 = factor(v1, levels = colnames(r))) %>% 
+                arrange(v1) %>%
+                mutate(v1 = paste(1:nvar, ". ", v1, sep = ""))) %>%
+    setNames(c("v1", 1:(nvar-1), "M", "SD")) %>%
+    mutate_at(vars(`1`:SD), funs(ifelse(!is.na(.) == T, sprintf("%.2f", .), "")))
+  
+  tab$M[grepl("Sex", tab$v1)] <- paste(sprintf("%.2f", table(dat$Sex)[1]/sum(table(dat$Sex))), " %", sep = "")
+  tab$SD[grepl("Sex", tab$v1)] <- ""
+  return(tab)
+}
+
+rs <- tibble(
+  dataset = c("GSOEP", "SHP", "BHPS"), 
+  data = list(
+    network %>% filter(Year == 1984) %>% select(pid, health:leisure, Sex, Age),
+    shp_trim %>% filter(year == 2000) %>% select(pid, lifesat:work, Sex, Age),
+    bhps_trim %>% filter(wave == 1996) %>% select(pid, health:lifesat, Sex, Age)
+    )
+) %>%
+  mutate(r = map(data, r_fun))
+```
+
+
+#Population Networks
+##Run Models
+###GSOEP
+```{r, eval = F}
+gsoep_fit1_restricted <-  
+  mlVAR(network, 
+        vars = colnames(select(network, lifesat:leisure, -house)),
+        #vars = colnames(select(network, lifesat:leisure)),
+        idvar = "pid", 
+        lags = 1,
+        #dayvar = "day", 
+        beepvar = "syear",
+        temporal = "orthogonal",
+        contemporaneous = "orthogonal",
+        verbose = TRUE, 
+        scale = FALSE)
+
+gsoep_fit2 <-  
+  mlVAR(network, 
+        # vars = colnames(select(network, lifesat:leisure, -house)),
+        vars = colnames(select(network, lifesat:leisure)),
+        idvar = "pid", 
+        lags = 2,
+        #dayvar = "day", 
+        beepvar = "syear",
+        temporal = "orthogonal",
+        contemporaneous = "orthogonal",
+        verbose = TRUE, 
+        scale = FALSE)
+save(gsoep_fit1, gsoep_fit2, gsoep_fit1_restricted, gsoep_fit2_restricted, file = "~/Box/network/other projects/swb networks/gsoep_LS_mlvar_models.RData")
+```
+
+```{r, results = 'hide'}
+gsoep_sum_fit1 <- summary(gsoep_fit1)
+gsoep_sum_fit2 <- summary(gsoep_fit2)
+
+gsoep_sum_fit1_restricted <- summary(gsoep_fit1_restricted)
+gsoep_sum_fit2_restricted <- summary(gsoep_fit2_restricted)
+```
+
+###BHPS
+```{r, eval = F}
+bhps_fit1_restricted <-  
+  mlVAR(bhps_trim, 
+        # vars = colnames(dplyr::select(bhps_trim, health:lifesat)),
+        vars = colnames(select(bhps_trim, health:lifesat, -social, -partner, -house)),
+        idvar = "pid", 
+        lags = 1,
+        #dayvar = "day", 
+        beepvar = "beepvar",
+        temporal = "orthogonal",
+        contemporaneous = "orthogonal",
+        nCores = 7,
+        verbose = TRUE, 
+        scale = FALSE)
+
+bhps_fit2_restricted <-  
+  mlVAR(bhps_trim, 
+        # vars = colnames(select(bhps_trim, health:lifesat)),
+        vars = colnames(select(bhps_trim, health:lifesat, -social, -partner, -house)),
+        idvar = "pid", 
+        lags = 2,
+        #dayvar = "day", 
+        beepvar = "wave",
+        temporal = "orthogonal",
+        contemporaneous = "orthogonal",
+        nCores = 7,
+        verbose = TRUE, 
+        scale = FALSE)
+save(bhps_fit1, bhps_fit2, bhps_fit1_restricted, bhps_fit2_restricted,
+     file = "~/Box/network/other projects/swb networks/bhps_LS_mlvar_models.RData")
+```
+
+```{r, results = 'hide'}
+bhps_sum_fit1 <- summary(bhps_fit1)
+bhps_sum_fit2 <- summary(bhps_fit2)
+
+bhps_sum_fit1_restricted <- summary(bhps_fit1_restricted)
+bhps_sum_fit2_restricted <- summary(bhps_fit2_restricted)
+```
+
+###SHP
+```{r, eval = F}
+shp_fit1_restricted <-  
+  mlVAR(shp_trim, 
+        vars = colnames(dplyr::select(shp_trim, lifesat:work, -social, -partner)),
+        # vars = colnames(dplyr::select(shp_trim, lifesat:work)),
+        idvar = "pid", 
+        lags = 1,
+        #dayvar = "day", 
+        beepvar = "beepvar",
+        temporal = "orthogonal",
+        contemporaneous = "orthogonal",
+        #nCores = 7,
+        verbose = TRUE, 
+        scale = FALSE)
+
+shp_fit2_restricted <-  
+  mlVAR(shp_trim, 
+        # vars = colnames(dplyr::select(shp_trim, lifesat:work)),
+        vars = colnames(dplyr::select(shp_trim, lifesat:work, -social, -partner)),
+        idvar = "pid", 
+        lags = 2,
+        #dayvar = "day", 
+        beepvar = "beepvar",
+        temporal = "orthogonal",
+        contemporaneous = "orthogonal",
+        #nCores = 7,
+        verbose = TRUE, 
+        scale = FALSE)
+save(shp_fit1, shp_fit2, shp_fit1_restricted, shp_fit2_restricted, file = "~/Box/network/other projects/swb networks/shp_LS_mlvar_models.RData")
+```
+
+```{r, results = 'hide'}
+shp_sum_fit1 <- summary(shp_fit1)
+shp_sum_fit2 <- summary(shp_fit2)
+
+shp_sum_fit1_restricted <- summary(shp_fit1_restricted)
+shp_sum_fit2_restricted <- summary(shp_fit2_restricted)
+```
+
+##Plots
+```{r}
+plot_fun <- function(x,type, sd = F, sig = "hide", model){
+  if(model == "BHPS"){groups <- list(ls = 8, other = 1:7)}
+  else if(model == "GSOEP"){groups <- list(ls = 1, other = 2:7)}
+  else{groups <- list(ls = 1, other = 2:7)}
+  plot.res <- plot(x, type, layout = "spring", groups = groups, nonsig = sig,
+       curve = -1,legend = FALSE,SD = sd, details = FALSE, mar = c(5,5,5,5), 
+       border.width = 2.5, title =  type, loop = .7, node.width = 1.6,
+       edge.width = 1, asize = 5,label.font = 2,label.fill.vertical = 1,
+       label.fill.horizontal = 1,edge.color = "blue", DoNotPlot = TRUE,
+       color = c(RColorBrewer::brewer.pal(3, "Set3")[1], "white"))
+  if(sd == F){
+  plot.res$graphAttributes$Edges$lty[plot.res$Edgelist$weight < 0] <- 2
+  plot.res$graphAttributes$Edges$color <-
+    ifelse(plot.res$Edgelist$weight <.02, "thistle2",
+    ifelse(plot.res$Edgelist$weight <.04, "mediumorchid", "midnightblue"))
+  }
+  plot(plot.res)
+}
+
+par(mfrow = c(3,2))
+plot_fun(gsoep_fit1, "temporal", sd = F, sig = 'hide', "GSOEP"); title("GSOEP lag1")
+plot_fun(gsoep_fit2, "temporal", sd = F, sig = 'hide', "GSOEP"); title("GSOEP lag2")
+plot_fun(bhps_fit1, "temporal", sd = F, sig = 'hide', "BHPS"); title("BHPS lag1")
+plot_fun(bhps_fit2, "temporal", sd = F, sig = 'hide', "BHPS"); title("BHPS lag2")
+plot_fun(shp_fit1, "temporal", sd = F, sig = 'hide', "SHP"); title("SHP lag1")
+plot_fun(shp_fit2, "temporal", sd = F, sig = 'hide', "SHP"); title("SHP lag2")
+```
+
+##Structure Comparisons
+###Full Models
+```{r}
+gsoep_temporal <- gsoep_sum_fit1$temporal %>% 
+  mutate(dataset = "GSOEP", from = recode(from, `dwelling` = "house", `leisure` = "amtleis"),
+         to = recode(to, `dwelling` = "house", `leisure` = "amtleis"))
+bhps_temporal <- bhps_sum_fit1$temporal %>% mutate(dataset = "BHPS")
+shp_temporal <- shp_sum_fit1$temporal %>% mutate(dataset = "SHP")
+
+temporal_edges <- gsoep_temporal %>%
+  full_join(bhps_temporal) %>%
+  full_join(shp_temporal) %>%
+  filter(!(from %in% c("social", "partner", "house", "housework")) &
+         !(to   %in% c("social", "partner", "house", "housework"))) %>%
+  select(from, to, fixed, dataset) %>%
+  spread(key = dataset, value = fixed)
+
+temporal_edges %>%
+  summarize(gsoep_bhps_r = cor(GSOEP, BHPS, use = "pairwise"),
+            gsoep_shp_r =  cor(GSOEP, SHP, use = "pairwise"),
+            bhps_shp_r = cor(BHPS, SHP, use = "pairwise"))
+```
+
+###Limited Models
+```{r}
+gsoep_temporal_restricted <- gsoep_sum_fit1_restricted$temporal %>% 
+  mutate(dataset = "GSOEP", from = recode(from, `dwelling` = "house", `leisure` = "amtleis"),
+         to = recode(to, `dwelling` = "house", `leisure` = "amtleis"))
+bhps_temporal_restricted <- bhps_sum_fit1_restricted$temporal %>% mutate(dataset = "BHPS")
+shp_temporal_restricted <- shp_sum_fit1_restricted$temporal %>% mutate(dataset = "SHP")
+
+temporal_edges_restricted <- gsoep_temporal_restricted %>%
+  full_join(bhps_temporal_restricted) %>%
+  full_join(shp_temporal_restricted) %>%
+  filter(!(from %in% c("social", "partner", "house", "housework")) &
+         !(to   %in% c("social", "partner", "house", "housework"))) %>%
+  select(from, to, fixed, dataset) %>%
+  spread(key = dataset, value = fixed)
+
+temporal_edges_restricted %>%
+  summarize(gsoep_bhps_r = cor(GSOEP, BHPS, use = "pairwise"),
+            gsoep_shp_r =  cor(GSOEP, SHP, use = "pairwise"),
+            bhps_shp_r = cor(BHPS, SHP, use = "pairwise"))
+```
+
+##Centrality
+###GSOEP
+```{r}
+gsoep_temporal_centrality <- centrality_auto(select(gsoep_sum_fit1$temporal, from, to, fixed))
+centralityPlot(select(gsoep_sum_fit1$temporal, from, to, fixed))
+```
+
+###BHPS
+```{r}
+bhps_temporal_centrality <- centrality_auto(select(bhps_sum_fit1$temporal, from, to, fixed))
+centralityPlot(select(bhps_sum_fit1$temporal, from, to, fixed))
+```
+
+###SHP
+```{r}
+shp_temporal_centrality <- centrality_auto(select(shp_sum_fit1$temporal, from, to, fixed))
+centralityPlot(select(shp_sum_fit1$temporal, from, to, fixed))
+```
+
+#Person Level
+##Run Models
+```{r, eval = F}
+net_nested <- 
+  network %>% mutate(dataset = "GSOEP") %>%
+  full_join(shp_trim %>% mutate(dataset = "SHP")) %>%
+  full_join(bhps_trim %>% mutate(dataset = "BHPS")) %>%
+  group_by(pid, dataset) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  mutate(dataset = factor(dataset, levels = c("GSOEP", "BHPS", "SHP"))) %>%
+  filter(n >= 7) %>%
+  arrange(dataset, pid, syear) %>%
+  group_by(pid, dataset) %>%
+  nest()
+
+cols <- list(
+  GSOEP = c("lifesat", "health", "work", "housework", "income", "house", "leisure"),
+  SHP = c("lifesat", "partner", "income", "health", "leisure", "social", "work"),
+  BHPS = c("health", "income", "house", "partner", "work", "social", "leisure", "lifesat")
+)
+
+gVAR_fun <- function(x, pid, dataset, perc){
+  print(sprintf("%s Subject %s, %.2f complete", dataset, pid, perc))
+  dat <- select(x, one_of(cols[[dataset]]))
+  n <- nrow(dat)
+  cutoff <- ifelse(dataset == "GSOEP", 15, 5)
+  na_test <- apply(dat, 2, function(x) sum(is.na(x) == F))
+  sd_test <- apply(dat, 2, function(x) sd(x, na.rm = T) == 0)
+  na_test <- which(na_test < cutoff | sd_test == TRUE)
+  if(length(na_test >= 1)){dat <- select(dat, -na_test)}
+  # dat <- dat[complete.cases(dat),]
+  gamma <- 0; lambda <- c(n*01, n*.02) #seq(.01, n*.01, length.out = 10)
+  fit <-
+    graphicalVAR(dat, gamma = gamma, maxit.in = 1000, maxit.out = 1000,
+                      lambda_beta = lambda, lambda_kappa = lambda[1], 
+                      verbose = T, scale = F, centerWithin = F, 
+                      likelihood = "unpenalized")
+  return(fit)
+}
+
+net_nested <- net_nested %>%
+  mutate(perc = row_number()) %>%
+  # filter(!(dataset == "GSOEP" & pid %in% c(1601, 5303))) %>%
+  # filter(!(dataset == "GSOEP" & pid <= c(5303))) %>%
+  # filter(!(dataset == "GSOEP" & pid %in% c(4201, 4601, 5203, 5401, 6003, 7001, 7403,
+  # 8603, 9903, 10501, 10502, 11301))) %>%
+  # filter(!(dataset == "GSOEP" & pid <= 11301)) %>%
+  # filter(!(dataset == "BHPS" & pid %in% c(10063102, 10067248, 10356061, 10562079,
+  # 10594566, 10596771, 10648313, 10688617)) %>%
+  # filter(!(dataset == "BHPS" & pid <= 10688617)) %>%
+  mutate(gVAR_fit = pmap(list(data, pid, dataset, perc), possibly(gVAR_fun, NA_real_)))
+save(net_nested, file = "~/Box/network/other projects/swb networks/idiographic_networks.RData")
+```
+
+
+```{r, eval = F}
+# old bhps code
+gVAR_fun <- function(x){
+  n <- unique(x$n)
+  print(unique(x$pid2))
+  dat <- select(x, health:lifesat)
+  na_test <- apply(dat, 2, function(x) sum(is.na(x) == F))
+  na_test <- which(na_test < 5)
+  if(length(na_test >= 1)){dat <- select(dat, -na_test)}
+  gamma <- 0; lambda <- .25
+  fit <-
+    graphicalVAR(dat, gamma = gamma, maxit.in = 1000, maxit.out = 1000,
+                      lambda_beta = lambda, lambda_kappa = lambda, 
+                      verbose = F, scale = F, centerWithin = F)
+  #save(fit, file = sprintf("~/Box Sync/network/felix networks/gVAR_models/%i.RData", unique(x$pid2)))
+  return(fit)
+}
+
+bhps_nested <- bhps_nested %>%
+  filter(!(pid %in% c(10356061, 12182133, 12503452, 13769758, 14382326,
+  16313488, 17169577, 18906478, 94578354, 95101985, 95315888, 96599316,
+  97140279, 97619248, 97638234, 97678694, 98155245, 107252732))) %>%
+  # filter(!(pid %in% c(12503452, 13769758, 16313488, 17169577, 17775647, 
+  # 18906478, 97224464, 97475548, 11777982, 12182133, 12503452, 13241303, 
+  # 14382326, 15773868, 16829611, 17228239, 18620973, 94578354, 95101985, 
+  # 95315888, 96576995, 96599316, 97619248, 97678694, 97638234, 98082558, 
+  # 98155245, 107366444))) %>%
+  mutate(gVAR_fit = map(data, possibly(gVAR_fun, NA_real_)))
+save(bhps_nested, file = "~/Box Sync/network/swb networks/bhps_idiographic_networks.RData")
+```
+
+
+```{r, eval = F}
+# old shp code
+gVAR_fun <- function(x){
+  n <- unique(x$n)
+  print(unique(x$pid2))
+  dat <- select(x, lifesat:work)
+  na_test <- apply(dat, 2, function(x) sum(is.na(x) == F))
+  na_test <- which(na_test < 7)
+  if(length(na_test >= 1)){dat <- select(dat, -na_test)}
+  gamma <- 0; lambda <- .25
+  fit <-
+    graphicalVAR(dat, gamma = gamma, maxit.in = 1000, maxit.out = 1000,
+                      lambda_beta = lambda, lambda_kappa = lambda, 
+                      verbose = F, scale = F, centerWithin = F)
+  #save(fit, file = sprintf("~/Box Sync/network/felix networks/gVAR_models/%i.RData", unique(x$pid2)))
+  return(fit)
+}
+
+shp_nested <- shp_nested %>%
+  filter(!(pid %in% c(9805101, 24998103))) %>% 
+  # filter(!(pid %in% c(57101, 61101, 618102, 695101, 1429102, 
+  # 3540101, 3550101, 4203102, 5346102, 6171101, 6208103,6758101, 6276101, 7793101,
+  # 8228201, 8774104, 9210102, 9388107, 9803102, 9805101, 10239101, 10565102, 10796102, 
+  # 10867102, 11581101, 20255102, 20391102, 21007102, 22071101, 21578102, 22122101,
+  # 22540101, 22554102, 23549102, 23787101, 23947101, 24137101, 24421102,
+  # 683102, 3849102, 5350102, 12292102, 13080102, 21633101, 22361102, 23218101))) %>%
+  mutate(gVAR_fit = map(data, possibly(gVAR_fun, NA_real_)))
+save(shp_nested, file = "~/Box Sync/network/swb networks/shp_idiographic_networks.RData")
+```
+
+##Extract Coefficients
+```{r}
+load(sprintf("%s/idiographic_networks.RData", data_path))
+beta_fun <- function(fit, SID){
+  PDC <- fit$PDC
+  from <- row.names(PDC)
+  PDC.long <- tbl_df(PDC) %>%
+    mutate(from = from,
+           type = "Temporal") %>%
+    gather(key = to, value = weight, everything(), -from, -type)
+}
+
+kappa_mat_fun <- function(fit){fit$PCC}
+
+kappa_long_fun <- function(fit){
+  PCC <- fit$PCC
+  PCC[lower.tri(PCC, diag = T)] <- NA
+  vars <- rownames(PCC)
+  PCC.long <- tbl_df(PCC) %>%
+    mutate(Var1 = vars,
+           type = "Contemporaneous") %>%
+    gather(key = Var2, value = weight, -Var1, -type) %>%
+    filter(!is.na(weight)) %>%
+    unite(var, Var1, Var2, sep = ".", remove = F)
+}
+
+net_nested <- net_nested %>%
+  filter(!is.na(gVAR_fit)) %>%
+  mutate(beta = map2(gVAR_fit, pid, beta_fun),
+         kappa_mat = map(gVAR_fit, kappa_mat_fun),
+         kappa = map(gVAR_fit, kappa_long_fun))
+save(net_nested, file = "~/Box/network/other projects/swb networks/idiographic_networks.RData")
+```
+
+##Structure Comparisons
+```{r}
+profile_cor_fun <- function(id_list, dataset){
+  if(dataset == "GSOEP"){pop_list <- gsoep_temporal}
+  else if(dataset == "SHP"){pop_list <- shp_temporal}
+  else{pop_list <- bhps_temporal}
+    id_list <- id_list %>% select(from, to, type, weight) %>% arrange(from, to)
+    pop_list <- pop_list %>% select(from, to, fixed) %>% arrange(from, to)
+    id_list %>% full_join(pop_list, by = c("from", "to")) %>% summarize(r = cor(fixed, weight, use = "pairwise"))
+}
+
+edge_fun <- function(id_list, dataset){
+  if(dataset == "GSOEP"){pop_list <- gsoep_temporal}
+  else if(dataset == "SHP"){pop_list <- shp_temporal}
+  else{pop_list <- bhps_temporal}
+  id_mat <- id_list %>% select(from, to, weight) %>% spread(key = to, value = weight) 
+  pop_mat <- pop_list %>% mutate(fixed = ifelse(P < .05, fixed, 0)) %>% select(from, to, fixed) %>% 
+     spread(key = to, value = fixed)
+  vars <- colnames(pop_mat)[colnames(pop_mat) %in% colnames(id_mat)] 
+  vars <- vars[vars %in% colnames(pop_mat)]
+  nEdges <- (length(vars) - 1)^2
+  pop_mat <- pop_mat %>% select(one_of(vars)) %>% filter(from %in% vars) %>% select(-from)
+  id_mat <- id_mat %>% select(one_of(vars)) %>% filter(from %in% vars) %>% select(-from)
+  nEdgesOrig <- sum(pop_mat != 0)
+  nShared <- sum(pop_mat != 0 & id_mat != 0)
+  nMissing <- sum(pop_mat == 0 & id_mat == 0) # missing edges
+  tibble(prop_shared = nShared/nEdgesOrig,
+         prop_missing = nMissing/(nEdges  - nEdgesOrig),
+         prop_repl = prop_shared + prop_missing)
+}
+
+net_nested <- net_nested %>%
+  mutate(temp_procor = map2(beta, dataset, profile_cor_fun))#,
+         #temp_match = map2(beta, dataset, edge_fun))
+
+cong_procors <- net_nested %>% unnest(temp_procor, .drop = T) %>% mutate(type = "Full") #%>%
+  # full_join(unnest(gsoep_nested, temp_procor_restricted, .drop = T) %>% mutate(type = "Restricted"))
+
+cong_procors %>%
+  group_by(type, dataset) %>%
+  summarise(mean = fisherz2r(mean(fisherz(r), na.rm = T)),
+            sd = fisherz2r(sd(fisherz(r), na.rm = T)),
+            max = max(r, na.rm = T), 
+            min = min(r, na.rm = T),
+            median = median(r, na.rm = T))
+
+cong_procors %>%
+  ggplot(aes(x = r)) + 
+  geom_histogram(color = "black", fill = "gray") + 
+  facet_grid(.~dataset) + 
+  theme_classic()
+
+cong_procors %>%
+  filter(type == "Full") %>%
+  select(-type) %>%
+  ggplot(aes(x = r)) + 
+    geom_histogram(aes(y = ..density..), color = "black", fill = "gray") + 
+    facet_grid(.~dataset) +
+    scale_x_continuous(limits = c(-1,1), breaks = seq(-1,1,1)) +
+    labs(x = "Correlation", y = "Density") +
+    theme_classic() +
+    theme(axis.text = element_text(face = "bold", size = rel(1.5)),
+          axis.title = element_text(face = "bold", size = rel(1.5)),
+          strip.text = element_text(face = "bold", size = rel(1.5)))
+ggsave(sprintf("%s/congruence_cor.png", data_path), width = 8, height = 4)
+```
+
+##Centrality
+```{r}
+centrality_direction <- function(edge_list, type){
+  if(type == "temporal"){
+    varnames <- unique(edge_list$from)
+    df <- tbl_df(matrix(rep(NA, 9 * length(varnames)), ncol = 9)) %>%
+      setNames(c("var", "inDegreeNeg", "inDegreePos", "inStrengthNeg", "inStrengthPos",
+                 "outDegreeNeg", "outDegreePos", "outStrengthNeg", "outStrengthPos"))
+    for(i in 1:length(varnames)){
+      var1 <- varnames[i]
+      df[i,] <- edge_list %>% 
+        filter(from == var1 | to == var1) %>%
+        mutate(direction = ifelse(from == var1, "out", "in"),
+               Variable = var1) %>%
+        group_by(direction, Variable) %>%
+        summarize(StrengthPos = sum(weight[weight > 0], na.rm = T),
+                  StrengthNeg = sum(weight[weight < 0], na.rm = T),
+                  DegreePos = sum(weight > 0),
+                  DegreeNeg = sum(weight < 0)) %>%
+        gather(key = type, value = value, StrengthPos:DegreeNeg) %>%
+        unite(comb, direction, type, sep = "") %>%
+        spread(key = comb, value = value)
+    }
+    return(df)
+  } else {
+    varnames <- unique(c(edge_list$Var1, edge_list$Var2))
+    df <- tbl_df(matrix(rep(NA, 3 * length(varnames)), ncol = 5)) %>%
+      setNames(c("Variable", "Negative", "Positive"))
+    for(i in 1:length(varnames)){
+      var1 <- varnames[i]
+      df[i,] <- edge_list %>% 
+        filter(Var1 == var1 | Var2 == var1) %>%
+        mutate(Variable = var1) %>%
+        group_by(Variable) %>%
+        summarize(Positive = sum(weight[weight > 0], na.rm = T),
+                  Negative = sum(weight[weight < 0], na.rm = T))
+    }
+    return(df)
+  }
+}
+
+centralityList <- function(x, gVAR, SID, dataset) {
+  print(sprintf("%s Subject %s", as.character(dataset), SID))
+      centrality <- centrality_auto(data.frame(select(x, from, to, weight)))
+      mat <- gVAR$PDC
+      diag(mat) <- 0
+      varnames <- as.character(unique(x$from))
+      degree <- tibble(var = row.names(mat), 
+                       InDegree = colSums(mat != 0), 
+                       OutDegree = rowSums(mat != 0))
+      df <- tbl_df(centrality$node.centrality %>% mutate(var = varnames)) %>%
+      full_join(degree)
+      return(df)
+}
+
+beta_centrality_fun <- function(x) {
+  data <- x %>%
+    select(from, to, weight) %>%
+    mutate(weight = as.numeric(weight))
+  centrality <- centrality_auto(data.frame(data))
+  outdegree <- degree(igraph::as.igraph(qgraph(data, DoNotPlot = TRUE), attributes = TRUE), mode = c("out"))
+  indegree <- degree(igraph::as.igraph(qgraph(data, DoNotPlot = TRUE), attributes = TRUE), mode = c("in"))
+  df <- data.frame(var = rownames(centrality$node.centrality), 
+                   centrality$node.centrality,
+                   InDegree = indegree,
+                   OutDegree = outdegree,
+                   Degree = indegree + outdegree)
+}
+```
+
+```{r, eval = F}
+# calculate centrality for each subject for each wave and save them to a list #
+net_nested <- net_nested %>%
+  filter(!(pid == "1293002" & dataset == "GSOEP") & 
+         !(pid == "97736481" & dataset == "BHPS")) %>%
+  mutate(#beta_centrality = map(beta, possibly(beta_centrality_fun, NA_real_)), 
+         #beta_signed_centrality = map(beta, possibly(~centrality_direction(., "temporal"), NA_real_)),
+         beta_centrality = pmap(list(beta, gVAR_fit, pid, dataset), 
+                                possibly(centralityList, NA_real_)))
+```
+
+```{r}
+beta_centrality <- net_nested %>%
+  filter(!is.na(beta_centrality)) %>%
+  unnest(beta_centrality) %>%
+  mutate(type = "Temporal",
+         pid = factor(pid)) %>%
+  gather(key = measure, value = value, InStrength, OutStrength, na.rm = T) %>%
+  group_by(measure, pid, dataset) %>%
+  mutate(asc_rank = dense_rank(desc(value)),
+         desc_rank = dense_rank(value),
+         z = as.numeric(scale(value, center = T, scale = T))) %>%
+  ungroup() %>%
+  group_by(measure, var, dataset) %>%
+  mutate(rank_var = dense_rank(desc(value))) %>% 
+  ungroup()
+
+# beta_signed_centrality <- net_nested %>%
+#   unnest(beta_signed_centrality) %>%
+#   mutate(type = "Temporal",
+#          pid = factor(pid)) %>%
+#   gather(key = measure, value = value, contains("Strength")) %>%
+#   group_by(measure, pid, dataset) %>%
+#   mutate(asc_rank = dense_rank(desc(value)),
+#          desc_rank = dense_rank(value),
+#          z = as.numeric(scale(value))) %>%
+#   ungroup()
+
+# Top Down Only
+pure_top_down_pid <- beta_centrality %>%
+  filter(var == "lifesat" & measure %in% c("InStrength", "OutStrength") &
+        (OutDegree >= 6 & InDegree < 2) &
+        (asc_rank[measure == "OutStrength"] %in% 1 & abs(z) > 1) &
+        (desc_rank[measure == "InStrength"] %in% 1 & abs(z) > 1)) %>%
+  mutate(group = "top down")
+
+# Bottom Up
+pure_bottom_up_pid <- beta_centrality %>%
+  filter(var == "lifesat" & measure %in% c("InStrength", "OutStrength") &
+        (InDegree >= 6 & OutDegree < 2) &
+        (desc_rank[measure == "OutStrength"] %in% 1 & abs(z) > 1) &
+        (asc_rank[measure == "InStrength"] %in% 1 & abs(z) > 1)) %>%
+  mutate(group = "bottom up")
+
+both_pid <- beta_centrality %>%
+  filter(var == "lifesat" & measure %in% c("InStrength", "OutStrength") &
+        (OutDegree >= 3 & InDegree >= 3) &
+        (asc_rank[measure == "OutStrength"] %in% 1:2 & abs(z) > 1) &
+        (asc_rank[measure == "InStrength"] %in% 1:2 & abs(z) > 1)) %>%
+  mutate(group = "both")
+
+neither_pid <- beta_centrality %>%
+  filter(var == "lifesat" & measure %in% c("InStrength", "OutStrength") &
+        (OutDegree < 3 & InDegree < 3) &
+        (desc_rank[measure == "OutStrength"] %in% 1 & abs(z) > 1) &
+        (desc_rank[measure == "InStrength"] %in% 1 & abs(z) > 1)) %>%
+  mutate(group = "neither")
+
+pure_top_down_pid %>%
+  full_join(pure_bottom_up_pid) %>%
+  full_join(both_pid) %>%
+  full_join(neither_pid) %>%
+  gather(key = measure2, value = value2, InDegree, OutDegree) %>%
+  ggplot(aes(x = value2)) + 
+    geom_histogram(color = "black", fill = "gray", bins = 7) + 
+    facet_grid(dataset~group + measure2) +
+    theme_classic()
+```
+
+
+
+##Plots
+```{r, eval = F}
+edge_colors <- RColorBrewer::brewer.pal(8, "Purples")[c(3,5,7)]
+plot_fun <- function(data, pid, type, dataset){
+  if(type == "Temporal"){data_mod <- data$PDC}
+  else{data_mod <- data$PCC}
+  nvar <- dim(data_mod)[2]
+  if(dataset == "BHPS"){groups <- list(lifesat = nvar, domains = 1:(nvar-1))}
+  else if(dataset == "GSOEP"){groups <- list(lifesat = 1, domains = 2:nvar)}
+  else{groups <- list(lifesat = 1, domains = 2:nvar)}
+  plot <- qgraph(data_mod, layout = "spring", title = sprintf("%s: %s for S%s", dataset, type, pid),
+                   loop = .7, node.width = 1.4, edge.width = 1, label.font = 2,
+                   label.fill.vertical = 1, label.fill.horizontal = 1, edge.color = "black",
+                   groups = groups, color = c(RColorBrewer::brewer.pal(3, "Set3")[1], "white"),
+                   legend = F, DoNotPlot = TRUE, mar = c(4,4,4,4), asize = 6, border.width = 2.5)
+  plot$graphAttributes$Edges$lty[plot$Edgelist$weight < 0] <- 2
+  plot$graphAttributes$Edges$color <-
+    ifelse(abs(plot$Edgelist$weight) <.1, edge_colors[1],
+    ifelse(abs(plot$Edgelist$weight) <.2, edge_colors[2], edge_colors[3]))
+  return(plot)
+}
+```
+
+###GSOEP
+```{r}
+library(animation)
+net_nested <- net_nested %>%
+  mutate(temp_plot = pmap(list(gVAR_fit, pid, "Temporal", dataset), possibly(plot_fun, NA_real_)),
+         contemp_plot = pmap(list(gVAR_fit, pid, "Contemporaneous", dataset), possibly(plot_fun, NA_real_)))
+save(net_nested, file = sprintf("%s/idiographic_networks.RData", data_path))
+
+temp_plots <- (net_nested %>% filter(dataset == "GSOEP"))$temp_plot
+names(temp_plots) <- (net_nested %>% filter(dataset == "GSOEP"))$pid
+
+setwd("~/Box/network/other projects/swb networks/idiographic/GSOEP")
+draw.a.plot <-  function(x){
+  plot(temp_plots[[x]])
+  }
+
+# Pure Top Down - Highest in OutStrength, Lowest in InStrength
+loop.animate <- function() {
+    lapply(as.character((pure_top_down_pid %>% filter(dataset == "GSOEP"))$pid)[1:50], function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="gsoep_top_down_beta_plots.gif", ani.width = 500, ani.height = 500)
+# Pure Bottom Up - Highest in InStrength, Lowest in OutStrength
+loop.animate <- function() {
+    lapply(as.character((pure_bottom_up_pid %>% filter(dataset == "GSOEP"))$pid), function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="gsoep_bottom_up_beta_plots.gif", ani.width = 500, ani.height = 500)
+
+
+# Pure Top Down - Highest in OutStrength, Lowest in InStrength
+loop.animate <- function() {
+    lapply(as.character((both_pid %>% filter(dataset == "GSOEP"))$pid), function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="gsoep_mixed_bottom_top_beta_plots.gif", ani.width = 500, ani.height = 500)
+
+# Pure Bottom Up - Highest in InStrength, Lowest in OutStrength
+loop.animate <- function() {
+    lapply(as.character((neither_pid %>% filter(dataset == "GSOEP"))$pid), function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="gsoep_weird_independent_beta_plots.gif", ani.width = 500, ani.height = 500)
+
+gsoep_plot <- net_nested %>%
+  unnest(beta_signed_centrality) %>%
+  mutate(type = "Temporal",
+         pid = factor(pid)) %>%
+  filter(dataset == "GSOEP") %>%
+  group_by(pid) %>%
+  mutate_each(funs(z = as.numeric(scale(.))), inStrengthPos, outStrengthPos) %>%
+  filter(var == "ls") %>%
+  ggplot(aes(x = inStrengthPos_z, y = outStrengthPos_z)) + 
+    geom_hex() +
+  xlim(c(-2.5,2.5)) + ylim(c(-2.5,2.5)) +
+  geom_hline(aes(yintercept = 0)) + 
+  geom_vline(aes(xintercept = 0)) +
+  theme_classic()
+
+gsoep_centrality <- gsoep_nested %>%
+  filter(!is.na(beta_centrality) & dataset == "GSOEP") %>%
+  unnest(beta_centrality) %>%
+  mutate(type = "Temporal",
+         pid = factor(pid)) %>%
+  group_by(pid) %>%
+  mutate_at(vars(InStrength, OutStrength), funs(z = as.numeric(scale(.)))) %>%
+  filter(var == "lifesat") %>%
+  ggplot(aes(x = InStrength_z, y = OutStrength_z)) + 
+    geom_hex() +
+  xlim(c(-2.5,2.5)) + ylim(c(-2.5,2.5)) +
+  geom_hline(aes(yintercept = 0)) + 
+  geom_vline(aes(xintercept = 0)) +
+  labs(title = "GSOEP") + 
+  annotate("text", x = -2.5, y = -2.5, label = "Neither", hjust = 0) +
+  annotate("text", x = -2.5, y =  2.5, label = "Top Down", hjust = 0) +
+  annotate("text", x =  1.75,y = -2.5, label = "Bottom Up", hjust = 0) +
+  annotate("text", x =  1.75,y =  2.5, label = "Both", hjust = 0) +
+  theme_classic() +
+  theme(plot.title  = element_text(face = "bold", hjust = .5),
+        axis.title = element_text(face = "bold"),
+        axis.text = element_text(face = "bold"),
+        legend.position = "bottom")
+```
+
+
+###BHPS
+```{r}
+temp_plots <- (net_nested %>% filter(dataset == "BHPS"))$temp_plot
+names(temp_plots) <- (net_nested %>% filter(dataset == "BHPS"))$pid
+
+
+setwd("~/Box/network/other projects/swb networks/idiographic/BHPS")
+draw.a.plot <-  function(x){
+  plot(temp_plots[[x]])
+  }
+
+# Pure Top Down - Highest in OutStrength, Lowest in InStrength
+loop.animate <- function() {
+    lapply(as.character((pure_top_down_pid %>% filter(dataset == "BHPS"))$pid)[1:50], function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="bhps_top_down_beta_plots.gif", ani.width = 500, ani.height = 500)
+# Pure Bottom Up - Highest in InStrength, Lowest in OutStrength
+loop.animate <- function() {
+    lapply(as.character((pure_bottom_up_pid %>% filter(dataset == "BHPS"))$pid)[1:50], function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="bhps_bottom_up_beta_plots.gif", ani.width = 500, ani.height = 500)
+
+
+# Pure Top Down - Highest in OutStrength, Lowest in InStrength
+loop.animate <- function() {
+    lapply(as.character((both_pid %>% filter(dataset == "BHPS"))$pid), function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="bhps_mixed_bottom_top_beta_plots.gif", ani.width = 500, ani.height = 500)
+
+# Pure Bottom Up - Highest in InStrength, Lowest in OutStrength
+loop.animate <- function() {
+    lapply(as.character((neither_pid %>% filter(dataset == "BHPS"))$pid), function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="bhps_weird_independent_beta_plots.gif", ani.width = 500, ani.height = 500)
+
+net_nested %>%
+  filter(dataset == "BHPS") %>%
+  unnest(beta_signed_centrality) %>%
+  mutate(type = "Temporal",
+         pid = factor(pid)) %>%
+  group_by(pid) %>%
+  mutate_each(funs(z = as.numeric(scale(.))), inStrengthNeg, outStrengthNeg) %>%
+  filter(var == "lifesat") %>%
+  ggplot(aes(x = inStrengthNeg_z, y = outStrengthNeg_z)) + 
+    geom_hex() +
+  xlim(c(-2.5,2.5)) + ylim(c(-2.5,2.5)) +
+  geom_hline(aes(yintercept = 0)) + 
+  geom_vline(aes(xintercept = 0)) +
+  theme_classic()
+
+bhps_centrality <- net_nested %>%
+  filter(!is.na(beta_centrality) & dataset == "BHPS") %>%
+  unnest(beta_centrality) %>%
+  mutate(type = "Temporal",
+         pid = factor(pid)) %>%
+  group_by(pid) %>%
+  mutate_each(funs(z = as.numeric(scale(.))), InStrength, OutStrength) %>%
+  filter(var == "lifesat") %>%
+  ggplot(aes(x = InStrength_z, y = OutStrength_z)) + 
+    geom_hex() +
+  xlim(c(-2.5,2.5)) + ylim(c(-2.5,2.5)) +
+  geom_hline(aes(yintercept = 0)) + 
+  geom_vline(aes(xintercept = 0)) +
+  annotate("text", x = -2.5, y = -2.5, label = "Neither", hjust = 0) +
+  annotate("text", x = -2.5, y =  2.5, label = "Top Down", hjust = 0) +
+  annotate("text", x =  1.75,y = -2.5, label = "Bottom Up", hjust = 0) +
+  annotate("text", x =  1.75,y =  2.5, label = "Both", hjust = 0) +
+  labs(title = "BHPS") + 
+  theme_classic() +
+  theme(plot.title  = element_text(face = "bold", hjust = .5),
+        axis.title = element_text(face = "bold"),
+        axis.text = element_text(face = "bold"),
+        legend.position = "bottom")
+```
+
+###SHP
+```{r, eval = F}
+temp_plots <- (net_nested %>% filter(dataset == "SHP"))$temp_plot
+names(temp_plots) <- (net_nested %>% filter(dataset == "SHP"))$pid
+
+setwd("~/Box/network/other projects/swb networks/idiographic/SHP")
+draw.a.plot <-  function(x){
+  plot(temp_plots[[x]])
+  }
+
+# Pure Top Down - Highest in OutStrength, Lowest in InStrength
+loop.animate <- function() {
+    lapply(as.character((pure_top_down_pid %>% filter(dataset == "SHP"))$pid)[1:50], function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="shp_top_down_beta_plots.gif", ani.width = 500, ani.height = 500)
+# Pure Bottom Up - Highest in InStrength, Lowest in OutStrength
+loop.animate <- function() {
+    lapply(as.character((pure_bottom_up_pid %>% filter(dataset == "SHP"))$pid)[1:50], function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="shp_bottom_up_beta_plots.gif", ani.width = 500, ani.height = 500)
+
+
+# Pure Top Down - Highest in OutStrength, Lowest in InStrength
+loop.animate <- function() {
+    lapply(as.character((both_pid %>% filter(dataset == "SHP"))$pid), function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="shp_mixed_bottom_top_beta_plots.gif", ani.width = 500, ani.height = 500)
+
+# Pure Bottom Up - Highest in InStrength, Lowest in OutStrength
+loop.animate <- function() {
+    lapply(as.character((neither_pid %>% filter(dataset == "SHP"))$pid), function(i) {
+       draw.a.plot(i) })
+}
+saveGIF(loop.animate(), interval = 2, movie.name="shp_weird_independent_beta_plots.gif", ani.width = 500, ani.height = 500)
+
+shp_nested %>%
+  unnest(beta_signed_centrality) %>%
+  mutate(type = "Temporal",
+         pid = factor(pid)) %>%
+  group_by(pid) %>%
+  mutate_each(funs(z = as.numeric(scale(.))), inStrengthNeg, outStrengthNeg) %>%
+  filter(var == "lifesat") %>%
+  ggplot(aes(x = inStrengthNeg_z, y = outStrengthNeg_z)) + 
+    geom_hex() +
+  xlim(c(-2.5,2.5)) + ylim(c(-2.5,2.5)) +
+  geom_hline(aes(yintercept = 0)) + 
+  geom_vline(aes(xintercept = 0)) +
+  theme_classic()
+
+shp_centrality <- shp_nested %>%
+  unnest(beta_centrality) %>%
+  mutate(type = "Temporal",
+         pid = factor(pid)) %>%
+  group_by(pid) %>%
+  mutate_each(funs(z = as.numeric(scale(.))), InStrength, OutStrength) %>%
+  filter(var == "lifesat") %>%
+  ggplot(aes(x = InStrength_z, y = OutStrength_z)) + 
+    geom_hex() +
+  xlim(c(-2.5,2.5)) + ylim(c(-2.5,2.5)) +
+  geom_hline(aes(yintercept = 0)) + 
+  geom_vline(aes(xintercept = 0)) +
+  annotate("text", x = -2.5, y = -2.5, label = "Neither", hjust = 0) +
+  annotate("text", x = -2.5, y =  2.5, label = "Top Down", hjust = 0) +
+  annotate("text", x =  1.75,y = -2.5, label = "Bottom Up", hjust = 0) +
+  annotate("text", x =  1.75,y =  2.5, label = "Both", hjust = 0) +
+  labs(title = "BHPS") + 
+  theme_classic() +
+  theme(plot.title  = element_text(face = "bold", hjust = .5),
+        axis.title = element_text(face = "bold"),
+        axis.text = element_text(face = "bold"),
+        legend.position = "bottom")
+```
+
+```{r}
+net_nested %>%
+  filter(!is.na(beta_centrality)) %>%
+  unnest(beta_centrality) %>%
+  mutate(type = "Temporal",
+         pid = factor(pid)) %>%
+  group_by(pid, dataset) %>%
+  mutate_at(vars(InStrength, OutStrength), funs(z = as.numeric(scale(.)))) %>%
+  filter(var == "lifesat") %>%
+  ggplot(aes(x = InStrength_z, y = OutStrength_z)) + 
+    # geom_hex() +
+  stat_density2d(aes(fill = ..level..), geom = "polygon", n = 100) +#, h = .2) +
+  # geom_density_2d() +
+  xlim(c(-2.5,2.5)) + ylim(c(-2.5,2.5)) +
+  geom_hline(aes(yintercept = 0)) + 
+  geom_vline(aes(xintercept = 0)) +
+  annotate("text", x = -2.5, y = -2.5, label = "Neither", hjust = 0) +
+  annotate("text", x = -2.5, y =  2.5, label = "Top Down", hjust = 0) +
+  annotate("text", x =  2.5, y = -2.5, label = "Bottom Up", hjust = 1) +
+  annotate("text", x =  2.5, y =  2.5, label = "Both", hjust = 1) +
+  labs(x = "Standardized In Strength (Domain \u2192 General)", y = "Standardized Out Strength\n(General \u2192 Domain)",
+       fill = "Density") +
+  facet_grid(.~dataset) + 
+  theme_classic() +
+  theme(plot.title  = element_text(face = "bold", hjust = .5),
+        axis.title = element_text(face = "bold"),
+        axis.text = element_text(face = "bold"),
+        legend.position = "bottom", 
+        strip.text = element_text(face = "bold", size = rel(1.2)))
+```
+
+##Top Down v. Bottom Up Comparisons
+###GSOEP
+```{r}
+comp_fun <- function(beta){
+  vars <- unique(beta$from)
+  beta <- beta %>% 
+    filter((from == "lifesat" | to == "lifesat") & from != to) %>%
+    mutate(direction = ifelse(from == "lifesat", "topdown", "bottomup"),
+           var = ifelse(direction == "topdown", to, from)) %>%
+    select(-(from:to)) %>%
+    spread(key = direction, value = weight) %>%
+    mutate(diff = topdown-bottomup)
+  return(beta)
+}
+
+net_nested <- net_nested %>%
+  mutate(diff = map(beta, possibly(comp_fun, NA_real_)))
+
+net_nested %>%
+  unnest(diff, .drop = T) 
+
+beta_centrality %>%
+  mutate(pid = as.numeric(as.character(pid))) %>%
+  filter(var == "lifesat" & 
+        (measure == "InStrength" | measure == "OutStrength")) %>%
+  select(pid, measure, value, dataset) %>%
+  spread(key = measure, value = value) %>%
+  right_join(
+    net_nested %>% unnest(diff, .drop = T)
+  ) %>%
+  ggplot(aes(x = InStrength, y = OutStrength, fill = diff)) + 
+  geom_raster() + 
+  facet_wrap(dataset~var)
+```
+
+
