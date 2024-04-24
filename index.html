@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.2.269">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Emorie D Beck">
+<meta name="dcterms.date" content="2024-04-19">
+
+<title>Towards personalised happiness: An idiographic approach to change in satisfaction</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1.6em;
+  vertical-align: middle;
+}
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+    color: #aaaaaa;
+  }
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+code span.at { color: #7d9029; } /* Attribute */
+code span.bn { color: #40a070; } /* BaseN */
+code span.bu { color: #008000; } /* BuiltIn */
+code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+code span.ch { color: #4070a0; } /* Char */
+code span.cn { color: #880000; } /* Constant */
+code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+code span.dt { color: #902000; } /* DataType */
+code span.dv { color: #40a070; } /* DecVal */
+code span.er { color: #ff0000; font-weight: bold; } /* Error */
+code span.ex { } /* Extension */
+code span.fl { color: #40a070; } /* Float */
+code span.fu { color: #06287e; } /* Function */
+code span.im { color: #008000; font-weight: bold; } /* Import */
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+code span.op { color: #666666; } /* Operator */
+code span.ot { color: #007020; } /* Other */
+code span.pp { color: #bc7a00; } /* Preprocessor */
+code span.sc { color: #4070a0; } /* SpecialChar */
+code span.ss { color: #bb6688; } /* SpecialString */
+code span.st { color: #4070a0; } /* String */
+code span.va { color: #19177c; } /* Variable */
+code span.vs { color: #4070a0; } /* VerbatimString */
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+</style>
+
+
+<script src="site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="site_libs/quarto-nav/headroom.min.js"></script>
+<script src="site_libs/clipboard/clipboard.min.js"></script>
+<script src="site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="site_libs/quarto-search/fuse.min.js"></script>
+<script src="site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="./">
+<link href="./01-data-cleaning.html" rel="next">
+<script src="site_libs/quarto-html/quarto.js"></script>
+<script src="site_libs/quarto-html/popper.min.js"></script>
+<script src="site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="site_libs/quarto-html/anchor.min.js"></script>
+<link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="site_libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "sidebar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "start",
+  "type": "textbox",
+  "limit": 20,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit"
+  }
+}</script>
+
+<script src="site_libs/kePrint-0.0.1/kePrint.js"></script>
+<link href="site_libs/lightable-0.0.1/lightable.css" rel="stylesheet">
+
+
+</head>
+
+<body class="nav-sidebar floating">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+  <nav class="quarto-secondary-nav" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+    <div class="container-fluid d-flex justify-content-between">
+      <h1 class="quarto-secondary-nav-title">Towards personalised happiness: An idiographic approach to change in satisfaction</h1>
+      <button type="button" class="quarto-btn-toggle btn" aria-label="Show secondary navigation">
+        <i class="bi bi-chevron-right"></i>
+      </button>
+    </div>
+  </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article">
+<!-- sidebar -->
+  <nav id="quarto-sidebar" class="sidebar collapse sidebar-navigation floating overflow-auto">
+    <div class="pt-lg-2 mt-2 text-left sidebar-header">
+    <div class="sidebar-title mb-0 py-0">
+      <a href="./">Towards personalised happiness: An idiographic approach to change in satisfaction</a> 
+    </div>
+      </div>
+      <div class="mt-2 flex-shrink-0 align-items-center">
+        <div class="sidebar-search">
+        <div id="quarto-search" class="" title="Search"></div>
+        </div>
+      </div>
+    <div class="sidebar-menu-container"> 
+    <ul class="list-unstyled mt-1">
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./index.html" class="sidebar-item-text sidebar-link active"><span class="chapter-number">1</span>&nbsp; <span class="chapter-title">Workspace</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./01-data-cleaning.html" class="sidebar-item-text sidebar-link"><span class="chapter-number">2</span>&nbsp; <span class="chapter-title">Data Cleaning</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./02-population-models.html" class="sidebar-item-text sidebar-link"><span class="chapter-number">3</span>&nbsp; <span class="chapter-title">Population-Level Models</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./03-personalised-models.html" class="sidebar-item-text sidebar-link"><span class="chapter-number">4</span>&nbsp; <span class="chapter-title">Personalised Models</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./04-centrality.html" class="sidebar-item-text sidebar-link"><span class="chapter-number">5</span>&nbsp; <span class="chapter-title">Centrality</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./05-congruence.html" class="sidebar-item-text sidebar-link"><span class="chapter-number">6</span>&nbsp; <span class="chapter-title">Congruence Between Personalised and Population Models</span></a>
+  </div>
+</li>
+    </ul>
+    </div>
+</nav>
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#workspace" id="toc-workspace" class="nav-link active" data-scroll-target="#workspace"><span class="toc-section-number">1</span>  Workspace</a>
+  <ul class="collapse">
+  <li><a href="#packages" id="toc-packages" class="nav-link" data-scroll-target="#packages"><span class="toc-section-number">1.1</span>  Packages</a></li>
+  <li><a href="#codebooks" id="toc-codebooks" class="nav-link" data-scroll-target="#codebooks"><span class="toc-section-number">1.2</span>  Codebooks</a></li>
+  </ul></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title d-none d-lg-block">Towards personalised happiness: An idiographic approach to change in satisfaction</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-contents">
+             <p>Emorie D Beck </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Published</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">April 19, 2024</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+</header>
+
+<section id="workspace" class="level1" data-number="1">
+<h1 data-number="1"><span class="header-section-number">1</span> Workspace</h1>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>Mode <span class="ot">&lt;-</span> <span class="cf">function</span>(x) {</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  ux <span class="ot">&lt;-</span> <span class="fu">unique</span>(x)</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  ux <span class="ot">&lt;-</span> ux[<span class="sc">!</span><span class="fu">is.na</span>(ux)]</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>  ux[<span class="fu">which.max</span>(<span class="fu">tabulate</span>(<span class="fu">match</span>(x, ux)))]</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<section id="packages" class="level2" data-number="1.1">
+<h2 data-number="1.1" class="anchored" data-anchor-id="packages"><span class="header-section-number">1.1</span> Packages</h2>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(qgraph)</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(igraph)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+Attaching package: 'igraph'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following objects are masked from 'package:stats':
+
+    decompose, spectrum</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following object is masked from 'package:base':
+
+    union</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(glasso)</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(mlVAR)</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(graphicalVAR)</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(knitr)</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(kableExtra)</span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(readxl)      <span class="co"># read excel files</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(Rmisc)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Loading required package: lattice</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Loading required package: plyr</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(psych)</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(magrittr)</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(data.table)</span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>── Attaching core tidyverse packages ──────────────────────── tidyverse 2.0.0 ──
+✔ dplyr     1.1.4     ✔ readr     2.1.5
+✔ forcats   1.0.0     ✔ stringr   1.5.1
+✔ ggplot2   3.5.0     ✔ tibble    3.2.1
+✔ lubridate 1.9.3     ✔ tidyr     1.3.1
+✔ purrr     1.0.2     </code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>── Conflicts ────────────────────────────────────────── tidyverse_conflicts() ──
+✖ lubridate::%--%()      masks igraph::%--%()
+✖ ggplot2::%+%()         masks psych::%+%()
+✖ ggplot2::alpha()       masks psych::alpha()
+✖ dplyr::arrange()       masks plyr::arrange()
+✖ dplyr::as_data_frame() masks tibble::as_data_frame(), igraph::as_data_frame()
+✖ dplyr::between()       masks data.table::between()
+✖ purrr::compact()       masks plyr::compact()
+✖ purrr::compose()       masks igraph::compose()
+✖ dplyr::count()         masks plyr::count()
+✖ tidyr::crossing()      masks igraph::crossing()
+✖ dplyr::desc()          masks plyr::desc()
+✖ tidyr::extract()       masks magrittr::extract()
+✖ dplyr::failwith()      masks plyr::failwith()
+✖ dplyr::filter()        masks stats::filter()
+✖ dplyr::first()         masks data.table::first()
+✖ dplyr::group_rows()    masks kableExtra::group_rows()
+✖ lubridate::hour()      masks data.table::hour()
+✖ dplyr::id()            masks plyr::id()
+✖ lubridate::isoweek()   masks data.table::isoweek()
+✖ dplyr::lag()           masks stats::lag()
+✖ dplyr::last()          masks data.table::last()
+✖ lubridate::mday()      masks data.table::mday()
+✖ lubridate::minute()    masks data.table::minute()
+✖ lubridate::month()     masks data.table::month()
+✖ dplyr::mutate()        masks plyr::mutate()
+✖ lubridate::quarter()   masks data.table::quarter()
+✖ dplyr::rename()        masks plyr::rename()
+✖ lubridate::second()    masks data.table::second()
+✖ purrr::set_names()     masks magrittr::set_names()
+✖ purrr::simplify()      masks igraph::simplify()
+✖ dplyr::summarise()     masks plyr::summarise()
+✖ dplyr::summarize()     masks plyr::summarize()
+✖ purrr::transpose()     masks data.table::transpose()
+✖ lubridate::wday()      masks data.table::wday()
+✖ lubridate::week()      masks data.table::week()
+✖ lubridate::yday()      masks data.table::yday()
+✖ lubridate::year()      masks data.table::year()
+ℹ Use the conflicted package (&lt;http://conflicted.r-lib.org/&gt;) to force all conflicts to become errors</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(furrr)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Loading required package: future
+
+Attaching package: 'future'
+
+The following objects are masked from 'package:igraph':
+
+    %-&gt;%, %&lt;-%</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(Matrix)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+Attaching package: 'Matrix'
+
+The following objects are masked from 'package:tidyr':
+
+    expand, pack, unpack</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(RColorBrewer)</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>wd <span class="ot">&lt;-</span> <span class="st">"~/Box/network/other projects/swb networks"</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>wd <span class="ot">&lt;-</span> <span class="st">"~/Documents/projects/swb networks"</span></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>data_path <span class="ot">&lt;-</span> <span class="st">"/Volumes/Emorie/data"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</section>
+<section id="codebooks" class="level2" data-number="1.2">
+<h2 data-number="1.2" class="anchored" data-anchor-id="codebooks"><span class="header-section-number">1.2</span> Codebooks</h2>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="co"># list of all codebook sheets</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>sheets <span class="ot">&lt;-</span> <span class="fu">sprintf</span>(<span class="st">"%s/02_codebooks/01_master-codebook-2021-03-17.xlsx"</span>, wd) <span class="sc">%&gt;%</span> <span class="fu">excel_sheets</span>()</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a><span class="co"># function for reading in sheets</span></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>read_fun <span class="ot">&lt;-</span> <span class="cf">function</span>(x){</span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">sprintf</span>(<span class="st">"%s/02_codebooks/01_master-codebook-2021-03-17.xlsx"</span>, wd) <span class="sc">%&gt;%</span> <span class="fu">read_xlsx</span>(., <span class="at">sheet =</span> x)</span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a><span class="co"># read in sheets and index source</span></span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a>codebook <span class="ot">&lt;-</span> <span class="fu">tibble</span>(</span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">study =</span> sheets,</span>
+<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">codebook =</span> <span class="fu">map</span>(study, read_fun)</span>
+<span id="cb17-13"><a href="#cb17-13" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1295 / R1295C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1296 / R1296C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1297 / R1297C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1298 / R1298C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1299 / R1299C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1300 / R1300C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1301 / R1301C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1302 / R1302C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1303 / R1303C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1304 / R1304C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1305 / R1305C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1306 / R1306C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1307 / R1307C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1308 / R1308C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1309 / R1309C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1310 / R1310C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1311 / R1311C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1312 / R1312C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1313 / R1313C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1314 / R1314C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1315 / R1315C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1316 / R1316C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1317 / R1317C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1318 / R1318C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1319 / R1319C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in V1320 / R1320C22: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in W1321 / R1321C23: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in W1322 / R1322C23: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in W1323 / R1323C23: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in W1324 / R1324C23: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in W1325 / R1325C23: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in W1326 / R1326C23: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Expecting logical in W1327 / R1327C23: got '&nbsp;'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>New names:
+New names:
+• `` -&gt; `...18`
+• `` -&gt; `...19`
+• `` -&gt; `...20`
+• `` -&gt; `...21`
+• `` -&gt; `...22`
+• `` -&gt; `...23`</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb52"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a>ind_tab <span class="ot">&lt;-</span> codebook<span class="sc">$</span>codebook[[<span class="dv">6</span>]] <span class="sc">%&gt;%</span></span>
+<span id="cb52-2"><a href="#cb52-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(<span class="sc">-</span>old, <span class="sc">-</span>hrmnzn) <span class="sc">%&gt;%</span></span>
+<span id="cb52-3"><a href="#cb52-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">rename</span>(<span class="at">Item =</span> new) <span class="sc">%&gt;%</span></span>
+<span id="cb52-4"><a href="#cb52-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(.</span>
+<span id="cb52-5"><a href="#cb52-5" aria-hidden="true" tabindex="-1"></a>        , <span class="st">"html"</span></span>
+<span id="cb52-6"><a href="#cb52-6" aria-hidden="true" tabindex="-1"></a>        , <span class="at">escape =</span> F</span>
+<span id="cb52-7"><a href="#cb52-7" aria-hidden="true" tabindex="-1"></a>        , <span class="at">align =</span> <span class="fu">c</span>(<span class="st">"l"</span>, <span class="fu">rep</span>(<span class="st">"c"</span>, <span class="dv">5</span>))</span>
+<span id="cb52-8"><a href="#cb52-8" aria-hidden="true" tabindex="-1"></a>        , <span class="at">cap =</span> <span class="st">"&lt;strong&gt;Table X&lt;/strong&gt;&lt;br&gt;&lt;em&gt;List of Life and Domain Satisfaction Indicators Used in Fully and Partially Harmonized Models&lt;em&gt;"</span></span>
+<span id="cb52-9"><a href="#cb52-9" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">%&gt;%</span></span>
+<span id="cb52-10"><a href="#cb52-10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">kable_classic</span>(<span class="at">full_width =</span> F, <span class="at">html_font =</span> <span class="st">"Times New Roman"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb52-11"><a href="#cb52-11" aria-hidden="true" tabindex="-1"></a>  kableExtra<span class="sc">::</span><span class="fu">group_rows</span>(<span class="st">"Fully Harmonized"</span>, <span class="dv">1</span>, <span class="dv">7</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb52-12"><a href="#cb52-12" aria-hidden="true" tabindex="-1"></a>  kableExtra<span class="sc">::</span><span class="fu">group_rows</span>(<span class="st">"Partially Harmonized"</span>, <span class="dv">8</span>, <span class="dv">13</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb52-13"><a href="#cb52-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">footnote</span>(<span class="st">"Fully harmonized models included only harmonized indicators while partially harmonized models included all available domain satisfaction indicators."</span>) </span>
+<span id="cb52-14"><a href="#cb52-14" aria-hidden="true" tabindex="-1"></a><span class="fu">save_kable</span>(ind_tab, <span class="at">file =</span> <span class="fu">sprintf</span>(<span class="st">"%s/04_results/03_tables/tab-3-indicators.html"</span>, wd))</span>
+<span id="cb52-15"><a href="#cb52-15" aria-hidden="true" tabindex="-1"></a>ind_tab</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+
+<table class=" lightable-classic" style="font-family: Times New Roman; width: auto !important; margin-left: auto; margin-right: auto;border-bottom: 0;">
+<caption>
+<strong>Table X</strong><br><em>List of Life and Domain Satisfaction Indicators Used in Fully and Partially Harmonized Models<em></em></em>
+</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Item </th>
+   <th style="text-align:center;"> GSOEP </th>
+   <th style="text-align:center;"> SHP </th>
+   <th style="text-align:center;"> BHPS </th>
+   <th style="text-align:center;"> HILDA </th>
+   <th style="text-align:center;"> LISS </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr grouplength="7"><td colspan="6" style="border-bottom: 0;"><strong>Fully Harmonized</strong></td></tr>
+<tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with Life </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with Income </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with Health </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;">  </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with Home </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with Amount of Leisure Time </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with Housework Division </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;">  </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with Work </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+  </tr>
+  <tr grouplength="6"><td colspan="6" style="border-bottom: 0;"><strong>Partially Harmonized</strong></td></tr>
+<tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with Family </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with Relationship </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with Leisure Activities </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;"> X </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with Social Life </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;">  </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with School </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;"> X </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;padding-left: 2em;" indentlevel="1"> Satisfaction with Finances </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;">  </td>
+   <td style="text-align:center;"> X </td>
+   <td style="text-align:center;"> X </td>
+  </tr>
+</tbody>
+<tfoot>
+<tr><td style="padding: 0; " colspan="100%"><span style="font-style: italic;">Note: </span></td></tr>
+<tr><td style="padding: 0; " colspan="100%">
+<sup></sup> Fully harmonized models included only harmonized indicators while partially harmonized models included all available domain satisfaction indicators.</td></tr>
+</tfoot>
+</table>
+
+</div>
+</div>
+<div class="cell">
+
+</div>
+
+
+</section>
+</section>
+
+</main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    target: function(trigger) {
+      return trigger.previousElementSibling;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+  function tippyHover(el, contentFn) {
+    const config = {
+      allowHTML: true,
+      content: contentFn,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start'
+    };
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      return note.innerHTML;
+    });
+  }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+<nav class="page-navigation">
+  <div class="nav-page nav-page-previous">
+  </div>
+  <div class="nav-page nav-page-next">
+      <a href="./01-data-cleaning.html" class="pagination-link">
+        <span class="nav-page-text"><span class="chapter-number">2</span>&nbsp; <span class="chapter-title">Data Cleaning</span></span> <i class="bi bi-arrow-right-short"></i>
+      </a>
+  </div>
+</nav>
+</div> <!-- /content -->
+
+
+
+</body></html>
